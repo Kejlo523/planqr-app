@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { FaArrowLeft } from "react-icons/fa";
 import { useTheme } from "../../../context/ThemeContext";
 import "./AdminRegistry.css";
 import "./KantechMonitor.css";
+import KantechDevTools from "./KantechDevTools";
+import { kantechTime as time, outcomeLabel } from "./kantechPresentation";
 
 interface Snapshot {
   mode: "off" | "observe" | "attendance";
+  devTools?: boolean;
   readers: { id: string; state: "connected" | "unavailable"; checkedAt: string }[];
   events: {
     key: string;
@@ -18,30 +21,14 @@ interface Snapshot {
   }[];
 }
 
-const outcomeLabel: Record<string, string> = {
-  observed: "Odczytano",
-  opened: "Otwarto listę",
-  closed: "Zamknięto listę",
-  recorded: "Dopisano obecność",
-  pending: "Oczekuje na plan",
-  choose_lesson: "Oczekuje na wybór zajęć",
-  no_match: "Brak pasujących zajęć",
-  no_session: "Brak otwartej listy",
-  unknown_card: "Karta nieprzypisana",
-  unknown_reader: "Czytnik nieprzypisany",
-  invalid_time: "Niejednoznaczny czas odbicia",
-  outside_cutover: "Poza zakresem zapisu",
-  access_denied: "Odmowa dostępu",
-  repeat_tap: "Powtórzone przyłożenie",
-  already_closed: "Lista już zamknięta",
-};
-
-const time = new Intl.DateTimeFormat("pl-PL", {
-  day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-  second: "2-digit", timeZone: "Europe/Warsaw",
-});
-
 export default function KantechMonitor() {
+  const [params] = useSearchParams();
+  const mode = params.get("dev");
+  const dev = mode === "" || mode === "1" || mode === "true" || params.get("") === "dev";
+  return dev ? <KantechDevTools /> : <KantechLiveMonitor />;
+}
+
+function KantechLiveMonitor() {
   const { theme } = useTheme();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState(false);
@@ -90,11 +77,14 @@ export default function KantechMonitor() {
             <h1>Kantech na żywo</h1>
             <p>Zdarzenia odczytane przez czytniki kart.</p>
           </div>
-          <span className="kantech-monitor__mode">
-            {snapshot?.mode === "observe" ? "Tryb obserwacji"
-              : snapshot?.mode === "attendance" ? "Zapis obecności"
-                : snapshot ? "Odczyt wyłączony" : forbidden ? "Brak dostępu" : "Łączenie…"}
-          </span>
+          <div className="kantech-monitor__nav">
+            {snapshot?.devTools && <Link to="?dev=1" className="admin-button admin-button--ghost">Tryb testowy</Link>}
+            <span className="kantech-monitor__mode">
+              {snapshot?.mode === "observe" ? "Tryb obserwacji"
+                : snapshot?.mode === "attendance" ? "Zapis obecności"
+                  : snapshot ? "Odczyt wyłączony" : forbidden ? "Brak dostępu" : "Łączenie…"}
+            </span>
+          </div>
         </header>
         {error && <p role="alert" className="kantech-monitor__error">Podgląd chwilowo niedostępny. Ponawiam połączenie.</p>}
         {forbidden && <p role="alert" className="kantech-monitor__error">Zaloguj się przez LDAP na konto administratora.</p>}

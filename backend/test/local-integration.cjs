@@ -106,6 +106,21 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.equal(content.subarray(0, 2).toString(), 'PK');
         assert.ok(content.includes(Buffer.from('xl/worksheets/sheet1.xml')));
         assert.ok(content.includes(Buffer.from('guest-test')));
+        await page.goto(url + '/adminpanel/kantech?=dev');
+        await page.getByRole('heading', { name: 'Testy Kantecha' }).waitFor();
+        await page.getByLabel('Alias z czytnika').fill('wi_sync77');
+        await page.getByLabel('Nazwa, login lub numer albumu').fill('123987');
+        await page.getByRole('button', { name: 'Zapisz przypisanie' }).click();
+        await page.getByRole('button', { name: 'Edytuj WISYNC_77' }).waitFor();
+        await page.getByLabel('Typ przypisania').selectOption('lecturer');
+        await page.getByLabel('Nazwisko w Planie ZUT').fill('Prowadzacy');
+        await page.getByRole('button', { name: 'Szukaj w Planie ZUT' }).click();
+        await page.getByRole('button', { name: 'Prowadzacy Testowy', exact: true }).click();
+        await page.getByRole('heading', { name: 'Teraz', exact: true }).waitFor();
+        await page.getByRole('button', { name: 'WISYNC_1 · Prowadzący' }).click();
+        await page.getByText('Otwarto listę', { exact: false }).first().waitFor();
+        await page.getByRole('button', { name: 'WISYNC_2 · Student' }).click();
+        await page.getByText('Dopisano obecność', { exact: false }).first().waitFor();
         console.log('Browser monitor, LDAP session and XLSX download passed.');
     } finally {
         await browser.close();
@@ -138,6 +153,7 @@ async function main() {
             ...process.env,
             NODE_ENV: 'test', PORT: String(backendPort), BACKEND_BIND_IP: '127.0.0.1',
             DISABLE_HTTPS: 'true', DEV_AUTH_BYPASS: 'false',
+            KANTECH_DEV_TOOLS: 'true',
             BACKEND_PUBLIC_URL: api, CORS_ORIGIN: api, DATABASE_URL: database.href,
             JWT_SECRET: secret(), ROOT_ADMIN_LOGIN: 'local-root', ROOT_ADMIN_PASSWORD: secret(),
             LDAP_URL: 'ldap://127.0.0.1:' + ldapPort, LDAP_DN: 'uid=%s,dc=localhost', LDAP_SYNC_ENABLED: 'false',
@@ -216,6 +232,38 @@ async function main() {
         const filtered = await (await request(api + '/api/kantech/events?readerId=49920&limit=1', { headers })).json();
         assert.equal(filtered.events.length, 1);
         assert.equal(filtered.events[0].readerId, '49920');
+        const dev = api + '/api/kantech/dev';
+        assert.equal((await request(dev)).status, 401);
+        assert.equal((await request(dev, { headers: authenticatedLecturer })).status, 403);
+        assert.equal((await request(api + '/api/kantech/events', {
+            headers, json: { readerId: '49920', alias: 'wi_sync12', occurredAt: at(-95), granted: true },
+        })).status, 204);
+        const observed = await (await request(dev, { headers })).json();
+        assert.ok(observed.observed.some((item) => item.alias === 'wi_sync12' && item.canonicalAlias === 'WISYNC_12'));
+        assert.ok((await live()).events.every((item) => !('sourceAlias' in item)));
+        const mapping = await request(dev + '/cards', {
+            headers, json: { alias: 'wi_sync12', role: 'participant', target: '654321' },
+        });
+        assert.equal(mapping.status, 200);
+        assert.equal((await mapping.json()).album, '654321');
+        const edit = await request(dev + '/cards', {
+            headers, json: { alias: 'WISYNC_12', role: 'participant', target: 'fixture-visitor', name: 'Gość testowy' },
+        });
+        assert.equal(edit.status, 200);
+        assert.equal((await edit.json()).name, 'Gość testowy');
+        const simulate = async (alias) => (await request(dev + '/scans', {
+            headers, json: { readerId: '49920', alias, source: 'demo' },
+        })).json();
+        assert.equal((await simulate('WI_SYNC1'))[0].outcome, 'opened');
+        const visitor = (await simulate('wi_sync12'))[0];
+        assert.equal(visitor.outcome, 'recorded');
+        assert.equal(visitor.label, 'Gość testowy');
+        assert.equal((await simulate('WISYNC_1'))[0].outcome, 'closed');
+        assert.equal((await list('demo')).status, 404);
+        const plan = await (await request(dev + '/schedule?teacherId=test-teacher', { headers })).json();
+        assert.ok([...plan.current, ...plan.upcoming].some((item) => item.id === '9001'));
+        assert.equal((await request(dev + '/scans', { headers, method: 'DELETE' })).status, 204);
+        assert.equal((await (await request(dev, { headers })).json()).simulated.length, 0);
         console.log('Observation mode, real login, admin-only monitor and worker authentication passed.');
         await Promise.all([stop(server), stop(worker)]);
 

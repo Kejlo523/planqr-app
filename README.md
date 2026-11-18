@@ -58,6 +58,14 @@ Opcjonalny `key` identyfikuje zdarzenie jako 64 znaki szesnastkowe SHA-256. Przy
 
 Proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>`. Fizyczna karta jest wyłącznie danymi zdarzenia. Komunikacja procesu czytnika odbywa się wewnątrz sieci aplikacji.
 
+## Tryb testowy Kantecha
+
+Administrator LDAP może otworzyć `/adminpanel/kantech?dev=1` albo `/adminpanel/kantech?=dev`. Lokalny Compose włącza tryb testowy. W innych środowiskach służy do tego oddzielne ustawienie `KANTECH_DEV_TOOLS=true`.
+
+Wybierz ostatnio odczytany alias lub wpisz go ręcznie. `WI_SYNC1`, `wi-sync-1` i `WISYNC_1` oznaczają to samo przypisanie. Uczestnika można zapisać według nazwy, loginu lub numeru albumu. Dla prowadzącego wybierz osobę z Planu ZUT i podaj jej login w PlanQR. Podgląd pokazuje bieżące i najbliższe zajęcia, a zapisane przypisania można edytować.
+
+W symulacji można wywołać odbicie gotowej karty albo wpisać własny alias. Przykładowe zajęcia pozwalają sprawdzić sekwencję prowadzący → uczestnik → prowadzący także poza godzinami zajęć. Tryb Plan ZUT używa bieżącego planu dla przypisanej sali. Wyniki symulacji są tymczasowe i nie trafiają do list obecności.
+
 ## Migracje i testy
 
 - Na pustej bazie uruchom `npm run migrate` przed startem backendu.

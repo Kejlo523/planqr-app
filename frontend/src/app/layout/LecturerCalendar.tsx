@@ -57,6 +57,7 @@ import {
   logout,
   type SessionInfo,
 } from "../services/authService";
+import { findZutTeachers } from "../services/zutScheduleService";
 import "./LecturerCalendar.css";
 
 leoProfanity.loadDictionary("en");
@@ -127,41 +128,11 @@ const normalizePreviewFieldValue = (value: string | null | undefined) =>
 const buildPreviewTeacherName = (surname: string, givenName: string) =>
   surname && givenName ? `${surname} ${givenName}` : "";
 
-const fetchPreviewTeacherMatches = async (
-  query: string,
-  signal?: AbortSignal,
-) => {
+const fetchPreviewTeacherMatches = async (query: string, signal?: AbortSignal) => {
   const normalizedQuery = normalizePreviewFieldValue(query);
-
-  if (!normalizedQuery) {
-    return [];
-  }
-
-  const response = await fetch(
-    `/schedule.php?kind=teacher&query=${encodeURIComponent(normalizedQuery)}`,
-    { signal },
-  );
-
-  if (!response.ok) {
-    return [];
-  }
-
-  const data = await response.json();
-
-  return Array.isArray(data)
-    ? Array.from(
-        new Set(
-          data
-            .filter(
-              (item: { item?: unknown }) => typeof item?.item === "string",
-            )
-            .map((item: { item: string }) =>
-              normalizePreviewFieldValue(item.item),
-            )
-            .filter(Boolean),
-        ),
-      )
-    : [];
+  if (!normalizedQuery) return [];
+  const teachers = await findZutTeachers(normalizedQuery, signal);
+  return [...new Set(teachers.map(({ name }) => normalizePreviewFieldValue(name)).filter(Boolean))];
 };
 
 const resolveWorkspaceMode = (

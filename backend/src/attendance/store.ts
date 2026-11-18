@@ -3,6 +3,7 @@ import { env } from '../config/env';
 import { IncomingScan, reportScan, updateScanOutcome } from './monitor';
 import { findLessons, getRoomKey } from './schedule';
 import { buildTimeline, Lesson, lessonSchema } from './timeline';
+import { cardAliasKeys } from './cardAlias';
 
 export const attendanceDb = new PrismaClient();
 const transactionOptions = { timeout: 20_000 };
@@ -87,14 +88,14 @@ export async function ingestScans(readerId: string, events: IncomingScan[]) {
     if (!events.length) return;
     const [reader, assignments] = await Promise.all([
         attendanceDb.attendanceReader.findUnique({ where: { id: readerId } }),
-        attendanceDb.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.map((event) => event.alias))] } } }),
+        attendanceDb.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
     ]);
     const roomKey = reader ? getRoomKey(reader.buildingId, reader.roomNumber) : '';
     const cards = new Map(assignments.map((card) => [card.alias, card]));
     const valid: IncomingScan[] = [];
     const data: Prisma.AttendanceScanCreateManyInput[] = [];
     for (const event of events) {
-        const card = cards.get(event.alias);
+        const card = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
         const occurredAt = event.occurredAt ? new Date(event.occurredAt) : null;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
             : !event.granted ? 'access_denied' : !card ? 'unknown_card' : null;

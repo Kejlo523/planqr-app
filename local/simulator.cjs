@@ -39,14 +39,15 @@ const routes = async (request, response) => {
         if (url.pathname === '/test/scans') {
             const reader = String(value.readerId ?? '49919');
             const at = value.at === undefined ? new Date() : new Date(value.at);
-            const alias = String(value.alias ?? '').toUpperCase();
-            if (!/^\d{1,8}$/.test(reader) || !/^WISYNC_\d{1,8}$/.test(alias) || isNaN(+at)) {
+            const alias = String(value.alias ?? '').trim();
+            const cardAlias = /^WI[_-]*SYNC[_-]*(\d{1,8})$/i.exec(alias);
+            if (!/^\d{1,8}$/.test(reader) || !cardAlias || isNaN(+at)) {
                 send(response, 400, { message: 'Pass readerId, WISYNC_<number>, and optional ISO time' });
                 return;
             }
             const buffer = scans.get(reader) ?? [];
             const status = value.granted === false ? 'Access denied' : 'Access granted';
-            const card = alias.split('_')[1].padStart(4, '0');
+            const card = cardAlias[1].padStart(4, '0');
             buffer.unshift(formatter.format(at) + ' ' + status + ' 0000:' + card + ' ' + alias);
             scans.set(reader, buffer.slice(0, 100));
             send(response, 201, { alias, reader, at: at.toISOString() });

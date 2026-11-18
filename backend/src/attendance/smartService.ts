@@ -3,6 +3,7 @@ import axios from 'axios';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import type { IncomingScan } from './monitor';
 import { parseCampusTime } from './scheduleTime';
+import { normalizeCardAlias } from './cardAlias';
 
 type XmlNode = Record<string, unknown>;
 const isNode = (value: unknown): value is XmlNode => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -53,12 +54,12 @@ export function parseReaderSnapshot(text: string, readerId: string): IncomingSca
         const match = /^(\S+)\s+(\S+)\s+(.+?)\s+(\S+)\s+(\S+)$/.exec(raw.trim());
         if (!match) continue;
         const [, date, time, status, card, identity] = match;
-        const alias = identity.toUpperCase();
+        const alias = identity;
         if (alias.length > 128) continue;
         const occurredAt = parseCampusTime(date + 'T' + time)?.toISOString() ?? null;
         // SmartService snapshot keys can depend on the response. Use the event content until the hardware pilot verifies them.
         const key = createHash('sha256').update(JSON.stringify([
-            readerId, occurredAt ?? [date, time], status.toLowerCase(), card.toUpperCase(), alias,
+            readerId, occurredAt ?? [date, time], status.toLowerCase(), card.toUpperCase(), normalizeCardAlias(alias),
         ])).digest('hex');
         records.push({ key, readerId, alias, occurredAt, granted: /^access granted$/i.test(status) });
     }

@@ -1,0 +1,23 @@
+.kantech-monitor__nav { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+.kantech-dev { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.kantech-dev__section { border: 1px solid var(--admin-accent-border); border-radius: var(--admin-radius); padding: clamp(.85rem, 2vw, 1.25rem); }
+.kantech-dev__section h2 { margin: 0 0 .7rem; font-size: 1.25rem; }
+.kantech-dev__section h3 { margin: .9rem 0 .4rem; font-size: 1rem; }
+.kantech-dev__section p { margin: .35rem 0 .7rem; }
+.kantech-dev__recent { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0; }
+.kantech-dev__recent h3, .kantech-dev__recent p { width: 100%; }
+.kantech-dev__form { display: grid; gap: .65rem; }
+.kantech-dev__form label { display: grid; gap: .3rem; font-weight: 600; }
+.kantech-dev__form input:not([type="checkbox"]), .kantech-dev__form select {
+  min-width: 0; padding: .55rem .65rem; border: 1px solid var(--admin-accent-border);
+  border-radius: var(--admin-radius); color: var(--admin-text); background: var(--admin-bg);
+  font: inherit; font-weight: 400;
+}
+.kantech-dev__form label.kantech-dev__check { display: flex; align-items: center; gap: .5rem; }
+.kantech-dev__form button { justify-self: start; }
+.kantech-dev__plan { padding: .65rem .75rem; background: var(--admin-accent-soft); }
+.kantech-dev__items { list-style: none; padding: 0; margin: 0; }
+.kantech-dev__items li { padding: .45rem 0; border-bottom: 1px solid var(--admin-accent-border); overflow-wrap: anywhere; }
+.kantech-dev__items li > strong + span { display: block; font-size: .88rem; line-height: 1.55; }
+.kantech-dev__row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .4rem; }
+@media (max-width: 800px) { .kantech-dev { grid-template-columns: minmax(0, 1fr); } }

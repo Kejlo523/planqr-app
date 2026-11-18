@@ -1,6 +1,7 @@
 services:
   backend:
     environment:
+      KANTECH_DEV_TOOLS: "true"
       LDAP_URL: ldap://fixtures:1389
       LDAP_SYNC_ENABLED: "false"
       ZUT_ATTENDANCE_SCHEDULE_URL: http://fixtures:8700/schedule_student.php

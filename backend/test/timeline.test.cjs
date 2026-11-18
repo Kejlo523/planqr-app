@@ -3,6 +3,7 @@ const test = require('node:test');
 const { buildTimeline } = require('../dist/attendance/timeline');
 const { parseReaderSnapshot } = require('../dist/attendance/smartService');
 const { parseCampusTime } = require('../dist/attendance/scheduleTime');
+const { normalizeCardAlias } = require('../dist/attendance/cardAlias');
 
 const start = '2026-11-18T10:00:00.000Z';
 const end = '2026-11-18T11:00:00.000Z';
@@ -55,7 +56,10 @@ test('SmartService timestamps use Warsaw and snapshot positions do not change ev
     const [next] = parseReaderSnapshot(xml('10'), '49919');
     assert.equal(first.key, next.key);
     assert.equal(first.occurredAt, '2026-07-15T07:29:07.000Z');
-    assert.equal(first.alias, 'WISYNC_22');
+    assert.equal(first.alias, 'wisync_22');
+    assert.equal(normalizeCardAlias(first.alias), 'WISYNC_22');
+    assert.equal(normalizeCardAlias('wi_sync1'), 'WISYNC_1');
+    assert.equal(normalizeCardAlias(' WI-SYNC-001 '), 'WISYNC_001');
     assert.equal(first.granted, true);
     assert.equal(parseCampusTime('2026-03-29T02:30:00'), null);
     assert.equal(parseCampusTime('2026-10-25T02:30:00'), null);

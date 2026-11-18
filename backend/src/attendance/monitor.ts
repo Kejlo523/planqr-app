@@ -1,16 +1,17 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { normalizeCardAlias } from './cardAlias';
 
 export const incomingScan = z.object({
     key: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     readerId: z.string().trim().min(1).max(64),
-    alias: z.string().trim().min(1).max(128).transform((value) => value.toUpperCase()),
+    alias: z.string().trim().min(1).max(128),
     occurredAt: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).nullable(),
     granted: z.boolean(),
 }).transform((scan) => ({
     ...scan,
     key: scan.key ?? createHash('sha256').update(JSON.stringify([
-        scan.readerId, scan.alias, scan.occurredAt, scan.granted,
+        scan.readerId, normalizeCardAlias(scan.alias), scan.occurredAt, scan.granted,
     ])).digest('hex'),
 }));
 
@@ -34,6 +35,7 @@ interface MonitorEvent {
     occurredAt: string | null;
     receivedAt: string;
     outcome: string;
+    sourceAlias: string;
 }
 
 const events = new Map<string, MonitorEvent>();
@@ -46,12 +48,14 @@ export function reportReader(readerId: string, state: 'connected' | 'unavailable
 export function reportScan(scan: IncomingScan, outcome: string, assigned = false) {
     const existing = events.get(scan.key);
     if (existing) return;
-    const label = assigned && /^WISYNC_[0-9]+$/i.test(scan.alias)
-        ? scan.alias
-        : '••••' + scan.alias.slice(-4);
+    const normalized = normalizeCardAlias(scan.alias);
+    const label = assigned && /^WISYNC_[0-9]+$/.test(normalized)
+        ? normalized
+        : '••••' + normalized.slice(-4);
     events.set(scan.key, {
         key: scan.key, readerId: scan.readerId, label,
         occurredAt: scan.occurredAt, receivedAt: new Date().toISOString(), outcome,
+        sourceAlias: scan.alias,
     });
     const oldest = events.keys().next().value;
     if (events.size > 100 && oldest) events.delete(oldest);
@@ -67,6 +71,19 @@ export function getMonitor(readerId?: string, limit = 100) {
         readers: Array.from(readers, ([id, info]) => ({ id, ...info }))
             .filter(({ id }) => !readerId || id === readerId),
         events: [...events.values()].reverse()
-            .filter((event) => !readerId || event.readerId === readerId).slice(0, limit),
+            .filter((event) => !readerId || event.readerId === readerId).slice(0, limit)
+            .map(({ sourceAlias: _sourceAlias, ...event }) => event),
     };
+}
+
+export function getObservedAliases() {
+    const recent = new Map<string, { alias: string; canonicalAlias: string; readerId: string; receivedAt: string }>();
+    for (const { sourceAlias, readerId, receivedAt } of [...events.values()].reverse()) {
+        if (/^(?:[0-9a-f]{2,}:)+[0-9a-f]{2,}$/i.test(sourceAlias)) continue;
+        const key = JSON.stringify([readerId, sourceAlias]);
+        if (!recent.has(key)) {
+            recent.set(key, { alias: sourceAlias, canonicalAlias: normalizeCardAlias(sourceAlias), readerId, receivedAt });
+        }
+    }
+    return [...recent.values()].slice(0, 20);
 }

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { normalizeRoom } from './schedule';
+import { normalizeCardAlias } from './cardAlias';
 
 const text = z.string().trim().min(1).max(128);
 const configuration = z.object({
@@ -24,7 +25,7 @@ async function main() {
             }),
             ...values.cards.map((card) => {
                 const data = {
-                    ...card, alias: card.alias.toUpperCase(), login: card.login.toLowerCase(),
+                    ...card, alias: normalizeCardAlias(card.alias), login: card.login.toLowerCase(),
                     scheduleId: card.scheduleId ?? null, album: card.album ?? null,
                 };
                 return prisma.attendanceCard.upsert({ where: { alias: data.alias }, create: data, update: data });

@@ -53,7 +53,7 @@ kantechEvents.get('/', requireLdapAdmin, (req, res) => {
         return;
     }
     res.set('Cache-Control', 'no-store');
-    res.json({ mode: env.KANTECH_MODE, ...getMonitor(parsed.data.readerId, parsed.data.limit) });
+    res.json({ mode: env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...getMonitor(parsed.data.readerId, parsed.data.limit) });
 });
 
 async function acceptReport(req: Request, res: Response) {

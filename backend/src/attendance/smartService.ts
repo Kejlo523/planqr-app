@@ -7,6 +7,8 @@ import { normalizeCardAlias } from './cardAlias';
 
 type XmlNode = Record<string, unknown>;
 const isNode = (value: unknown): value is XmlNode => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const loginScheduleRetryMs = 60_000;
+const loginScheduleError = 'SmartService operator login is outside its configured schedule';
 const parser = new XMLParser({
     parseTagValue: false, processEntities: false,
     isArray: (tag) => tag === 'item',
@@ -68,6 +70,7 @@ export function parseReaderSnapshot(text: string, readerId: string): IncomingSca
 
 export class SmartService {
     private key: string | undefined;
+    private retryLoginAt = 0;
 
     constructor(private readonly url: string, private readonly username: string, private readonly password: string) {}
 
@@ -80,7 +83,14 @@ export class SmartService {
 
     async read(readerId: string) {
         if (!this.key) {
-            this.key = findSessionKey(readXml(await this.request('Login', { userName: this.username, password: this.password })));
+            if (Date.now() < this.retryLoginAt) throw new Error(loginScheduleError);
+            const reply = readXml(await this.request('Login', { userName: this.username, password: this.password }));
+            if (isNode(reply) && isNode(reply.StandardFault) && typeof reply.StandardFault.Message === 'string'
+                && reply.StandardFault.Message.includes('SMARTLINK_INVALID_LOGIN_SCHEDULE')) {
+                this.retryLoginAt = Date.now() + loginScheduleRetryMs;
+                throw new Error(loginScheduleError);
+            }
+            this.key = findSessionKey(reply);
             if (!this.key) throw new Error('SmartService refused the session');
         }
         try {

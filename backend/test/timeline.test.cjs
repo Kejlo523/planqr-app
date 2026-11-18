@@ -1,7 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { createServer } = require('node:http');
 const { buildTimeline } = require('../dist/attendance/timeline');
-const { parseReaderSnapshot } = require('../dist/attendance/smartService');
+const { parseReaderSnapshot, SmartService } = require('../dist/attendance/smartService');
 const { parseCampusTime } = require('../dist/attendance/scheduleTime');
 const { normalizeCardAlias } = require('../dist/attendance/cardAlias');
 
@@ -64,4 +65,21 @@ test('SmartService timestamps use Warsaw and snapshot positions do not change ev
     assert.equal(parseCampusTime('2026-03-29T02:30:00'), null);
     assert.equal(parseCampusTime('2026-10-25T02:30:00'), null);
     assert.throws(() => parseReaderSnapshot('<!DOCTYPE item><item/>', '49919'));
+});
+
+test('SmartService backs off operator login outside its configured schedule', async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+        requests++;
+        response.end('<StandardFault><Message>SMARTLINK_INVALID_LOGIN_SCHEDULE. Error Code = 123</Message></StandardFault>');
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const source = new SmartService(`http://127.0.0.1:${server.address().port}`, 'test', 'examplePassword');
+        await assert.rejects(source.read('49919'), /outside its configured schedule/);
+        await assert.rejects(source.read('49919'), /outside its configured schedule/);
+        assert.equal(requests, 1);
+    } finally {
+        server.close();
+    }
 });

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { WorkspaceLayout } from "../../layout/WorkspaceLayout";
 import { useProtectedSession } from "../../router/ProtectedRoute";
 import { canOpenLecturerPlan } from "../../services/authService";
 import "./AdminRegistry.css";
 import "./KantechMonitor.css";
 import KantechDevTools from "./KantechDevTools";
+import KantechReaders from "./KantechReaders";
+import { KantechNavigation } from "./KantechNavigation";
 import { kantechTime as time, outcomeLabel } from "./kantechPresentation";
 import { useAdminScrollRoot } from "./useAdminScrollRoot";
 
@@ -28,11 +30,12 @@ export default function KantechMonitor() {
   const [params] = useSearchParams();
   const mode = params.get("dev");
   const dev = mode === "" || mode === "1" || mode === "true" || params.get("") === "dev";
+  const readers = params.get("view") === "readers";
   const session = useProtectedSession();
   return (
     <WorkspaceLayout title="Kantech" login={session?.login} back={{ to: "/adminpanel", label: "Administracja" }}
       navigation={{ ownPlan: canOpenLecturerPlan(session) }}>
-      {dev ? <KantechDevTools /> : <KantechLiveMonitor />}
+      {readers ? <KantechReaders /> : dev ? <KantechDevTools /> : <KantechLiveMonitor />}
     </WorkspaceLayout>
   );
 }
@@ -79,12 +82,7 @@ function KantechLiveMonitor() {
   return (
     <main className="kantech-monitor">
       <div className="kantech-monitor__body">
-        {snapshot?.devTools && (
-          <nav className="kantech-monitor__nav" aria-label="Widoki Kantecha">
-            <Link to="/adminpanel/kantech" aria-current="page">Odczyty na żywo</Link>
-            <Link to="?dev=1">Testy i przypisania</Link>
-          </nav>
-        )}
+        <KantechNavigation view="live" devTools={snapshot?.devTools ?? false} />
         <header className="kantech-monitor__heading">
           <div>
             <h1>Kantech na żywo</h1>

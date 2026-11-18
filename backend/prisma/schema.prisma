@@ -239,6 +239,10 @@ model AttendanceReader {
   label      String
 }
 
+model KantechReaderSetup {
+  id Int @id
+}
+
 model AttendanceCard {
   alias      String  @id
   login      String

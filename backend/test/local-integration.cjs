@@ -160,6 +160,19 @@ async function browserSmoke(api, simulator, password, directory) {
         await lessonHeading.waitFor();
         await page.getByRole('button', { name: 'Zamknij panel zajęć' }).click();
         await lessonHeading.waitFor({ state: 'hidden' });
+        await page.goto(url + '/adminpanel/kantech?view=readers');
+        await page.getByLabel('ID czytnika').fill('49998');
+        await page.getByLabel('Nazwa czytnika').fill('Czytnik testowy');
+        await page.getByRole('button', { name: 'Zapisz czytnik' }).click();
+        await page.getByText('Zapisano czytnik 49998.').waitFor();
+        await page.getByRole('button', { name: 'Edytuj czytnik 49998' }).click();
+        await page.getByLabel('Budynek').fill('TEST');
+        await page.getByLabel('Sala', { exact: true }).fill('401');
+        await page.getByRole('button', { name: 'Zapisz czytnik' }).click();
+        await page.getByText('TEST / 401', { exact: false }).waitFor();
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.getByRole('button', { name: 'Usuń czytnik 49998' }).click();
+        await page.getByText('Usunięto czytnik 49998.').waitFor();
         console.log('Browser monitor, LDAP session and XLSX download passed.');
     } finally {
         await browser.close();
@@ -193,6 +206,7 @@ async function main() {
             NODE_ENV: 'test', PORT: String(backendPort), BACKEND_BIND_IP: '127.0.0.1',
             DISABLE_HTTPS: 'true', DEV_AUTH_BYPASS: 'false',
             KANTECH_DEV_TOOLS: 'true',
+            KANTECH_DOOR_IDS: '49919,49920',
             BACKEND_PUBLIC_URL: api, CORS_ORIGIN: api, DATABASE_URL: database.href,
             JWT_SECRET: secret(), ROOT_ADMIN_LOGIN: 'local-root', ROOT_ADMIN_PASSWORD: secret(),
             LDAP_URL: 'ldap://127.0.0.1:' + ldapPort, LDAP_DN: 'uid=%s,dc=localhost', LDAP_SYNC_ENABLED: 'false',
@@ -200,7 +214,6 @@ async function main() {
             WORKER_SECRET_TOKEN: secret(), KANTECH_ACTIVE_FROM: at(-86_400),
         };
         run(['node_modules/prisma/build/index.js', 'migrate', 'deploy'], common);
-        run(['dist/attendance/configure.js', join(fixtures, 'assignments.json')], common);
         await mkdir(join(directory, 'uploads'));
 
         const seeded = new Client({ connectionString: database.href });
@@ -223,7 +236,7 @@ async function main() {
         const buttons = {
             worker: {
                 ...common, KANTECH_URL: simulator + '/SmartService', KANTECH_USER: 'fixture', KANTECH_PASS: secret(),
-                KANTECH_DOOR_IDS: '49919,49920', KANTECH_POLL_INTERVAL_MS: '500', KANTECH_REPORT_URL: api + '/internal/kantech',
+                KANTECH_POLL_INTERVAL_MS: '500', KANTECH_REPORT_URL: api + '/internal/kantech',
             },
         };
         const startBackend = (mode) => launch('dist/server.js', { ...common, KANTECH_MODE: mode }, directory);
@@ -245,6 +258,17 @@ async function main() {
         let server = startBackend('observe');
         let worker = launch('dist/attendance/worker.js', buttons.worker);
         let headers = await authenticate();
+        const readersApi = api + '/api/kantech/readers';
+        const workerReaders = api + '/internal/kantech/readers';
+        const service = { Authorization: 'Bearer ' + common.WORKER_SECRET_TOKEN };
+        assert.equal((await request(readersApi)).status, 401);
+        assert.equal((await request(readersApi, { headers: lecturer })).status, 403);
+        assert.equal((await request(workerReaders)).status, 401);
+        assert.deepEqual((await (await request(workerReaders, { headers: service })).json()).readerIds, ['49919', '49920']);
+        const imported = (await (await request(readersApi, { headers })).json()).readers;
+        assert.equal(imported.length, 2);
+        assert.ok(imported.every(({ roomNumber }) => !roomNumber));
+        run(['dist/attendance/configure.js', join(fixtures, 'assignments.json')], common);
         const live = async () => {
             const response = await request(api + '/api/kantech/events', { headers });
             if (!response.ok) throw new Error('Cannot read monitor');
@@ -257,13 +281,20 @@ async function main() {
         assert.equal((await request(api + '/api/kantech/events', { headers: student })).status, 403);
         assert.equal((await request(api + '/api/kantech/events', { json: {} })).status, 401);
         assert.equal((await request(api + '/internal/kantech', { json: {} })).status, 401);
-        const service = { Authorization: 'Bearer ' + common.WORKER_SECRET_TOKEN };
         const root = await authenticate(common.ROOT_ADMIN_LOGIN, common.ROOT_ADMIN_PASSWORD);
         assert.equal((await request(api + '/api/kantech/events', { headers: root })).status, 403);
         assert.equal((await request(api + '/api/kantech/events', { headers: root, json: {} })).status, 403);
         const authenticatedLecturer = await authenticate('lecturer-two');
         assert.equal((await request(api + '/api/kantech/events', { headers: authenticatedLecturer })).status, 403);
         assert.equal((await request(api + '/api/kantech/events', { headers: service, json: {} })).status, 401);
+        const newReader = { id: '49999', label: 'Czytnik dodany ręcznie' };
+        assert.equal((await request(readersApi, { headers: authenticatedLecturer, json: newReader })).status, 403);
+        assert.equal((await request(readersApi, { headers, json: { ...newReader, buildingId: 'WI1' } })).status, 400);
+        assert.equal((await request(readersApi, { headers, json: newReader })).status, 200);
+        await waitFor('new reader polled without restarting the worker', async () =>
+            (await live()).readers.some(({ id, state }) => id === newReader.id && state === 'connected'));
+        assert.equal((await request(readersApi + '/' + newReader.id, { headers, method: 'DELETE' })).status, 204);
+        assert.ok(!(await live()).readers.some(({ id }) => id === newReader.id));
         const bearer = { Authorization: 'Bearer ' + headers.Cookie.slice('jwt='.length) };
         assert.equal((await request(api + '/api/kantech/events', {
             headers: bearer, json: { readerId: '49920', alias: 'WISYNC_2', occurredAt: at(-100), granted: true },
@@ -403,6 +434,16 @@ async function main() {
         const file = await upload.json();
         assert.ok((await request(api + file.imageUrl)).ok);
         console.log('Tablet and upload regression checks passed.');
+
+        for (const id of ['49919', '49920']) {
+            assert.equal((await request(readersApi + '/' + id, { headers, method: 'DELETE' })).status, 204);
+        }
+        await stop(server);
+        server = startBackend('attendance');
+        headers = await authenticate();
+        assert.deepEqual((await (await request(workerReaders, { headers: service })).json()).readerIds, []);
+        assert.equal((await list(9001)).status, 200);
+        console.log('Reader changes reach the worker, deletions survive restart and attendance history remains available.');
     } finally {
         await Promise.all([...processes].map(stop));
         if (created) await sql.query('DROP DATABASE ' + name + ' WITH (FORCE)');

@@ -7,6 +7,7 @@ import { getSimulation, resetSimulation, simulateScan } from '../attendance/devS
 import { getObservedAliases } from '../attendance/monitor';
 import { getTeacherSchedule } from '../attendance/schedule';
 import { attendanceDb } from '../attendance/store';
+import { listReaders } from '../attendance/readers';
 import { env } from '../config/env';
 
 export const kantechDevRoutes = Router();
@@ -47,7 +48,7 @@ const api = (handler: (req: AuthRequest, res: Response) => Promise<void>) =>
 kantechDevRoutes.get('/', api(async (req, res) => {
     const [cards, readers] = await Promise.all([
         attendanceDb.attendanceCard.findMany({ orderBy: { alias: 'asc' } }),
-        attendanceDb.attendanceReader.findMany({ select: { id: true, label: true }, orderBy: { id: 'asc' } }),
+        listReaders(),
     ]);
     res.json({ cards, readers, observed: getObservedAliases(), simulated: getSimulation(owner(req)) });
 }));

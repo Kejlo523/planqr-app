@@ -9,6 +9,7 @@ export const outcomeLabel: Record<string, string> = {
   no_session: "Brak otwartej listy",
   unknown_card: "Karta nieprzypisana",
   unknown_reader: "Czytnik nieprzypisany",
+  reader_without_room: "Czytnik bez przypisanej sali",
   invalid_time: "Niejednoznaczny czas odbicia",
   outside_cutover: "Poza zakresem zapisu",
   access_denied: "Odmowa dostępu",

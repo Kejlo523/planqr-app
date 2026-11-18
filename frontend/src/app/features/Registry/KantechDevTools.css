@@ -19,4 +19,9 @@
 .kantech-dev__items li { padding: .45rem 0; border-bottom: 1px solid var(--admin-border); overflow-wrap: anywhere; }
 .kantech-dev__items li > strong + span { display: block; font-size: .88rem; line-height: 1.55; }
 .kantech-dev__row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .4rem; }
+.kantech-readers__room { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+.kantech-readers__room > label { min-width: 0; }
+.kantech-readers__actions { display: flex; gap: .45rem; flex-wrap: wrap; }
+.kantech-readers__details { color: var(--admin-text-muted); font-size: .85rem; }
+.kantech-monitor__notice { padding: .65rem 1rem; background: var(--admin-success-soft); }
 @media (max-width: 800px) { .kantech-dev { grid-template-columns: minmax(0, 1fr); } }

@@ -58,6 +58,10 @@ Opcjonalny `key` identyfikuje zdarzenie jako 64 znaki szesnastkowe SHA-256. Przy
 
 Proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>`. Fizyczna karta jest wyłącznie danymi zdarzenia. Komunikacja procesu czytnika odbywa się wewnątrz sieci aplikacji.
 
+Administrator LDAP może dodawać, edytować i usuwać czytniki w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. `GET /api/kantech/readers` zwraca listę, `POST /api/kantech/readers` zapisuje `id`, `label`, `buildingId` i `roomNumber`, a `DELETE /api/kantech/readers/:id` usuwa konfigurację. Budynek i sala są potrzebne do zapisu obecności.
+
+Proces odświeża listę przez wewnętrzne `GET /internal/kantech/readers`. Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu, jeśli baza nie ma jeszcze zapisanych czytników.
+
 ## Tryb testowy Kantecha
 
 Administrator LDAP może otworzyć `/adminpanel/kantech?dev=1` albo `/adminpanel/kantech?=dev`. Lokalny Compose włącza tryb testowy. W innych środowiskach służy do tego oddzielne ustawienie `KANTECH_DEV_TOOLS=true`.

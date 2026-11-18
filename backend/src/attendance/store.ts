@@ -90,7 +90,7 @@ export async function ingestScans(readerId: string, events: IncomingScan[]) {
         attendanceDb.attendanceReader.findUnique({ where: { id: readerId } }),
         attendanceDb.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
     ]);
-    const roomKey = reader ? getRoomKey(reader.buildingId, reader.roomNumber) : '';
+    const roomKey = reader?.buildingId && reader.roomNumber ? getRoomKey(reader.buildingId, reader.roomNumber) : '';
     const cards = new Map(assignments.map((card) => [card.alias, card]));
     const valid: IncomingScan[] = [];
     const data: Prisma.AttendanceScanCreateManyInput[] = [];
@@ -98,7 +98,8 @@ export async function ingestScans(readerId: string, events: IncomingScan[]) {
         const card = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
         const occurredAt = event.occurredAt ? new Date(event.occurredAt) : null;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
-            : !event.granted ? 'access_denied' : !card ? 'unknown_card' : null;
+            : !event.granted ? 'access_denied' : !card ? 'unknown_card'
+            : !roomKey && env.KANTECH_MODE === 'attendance' ? 'reader_without_room' : null;
         if (!reader || !card || !occurredAt || invalid || env.KANTECH_MODE === 'observe') {
             reportScan(event, invalid ?? 'observed', Boolean(card));
             continue;

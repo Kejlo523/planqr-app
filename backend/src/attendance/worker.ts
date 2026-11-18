@@ -8,8 +8,6 @@ const config = z.object({
     KANTECH_URL: z.string().url(),
     KANTECH_USER: z.string().min(1),
     KANTECH_PASS: z.string().min(1),
-    KANTECH_DOOR_IDS: z.string().transform((ids) => [...new Set(ids.split(',').map((id) => id.trim()).filter(Boolean))])
-        .pipe(z.array(z.string().max(64)).min(1).max(20)),
     KANTECH_POLL_INTERVAL_MS: z.coerce.number().int().min(500).max(60_000).default(1_000),
     KANTECH_REPORT_URL: z.string().url(),
     WORKER_SECRET_TOKEN: z.string().min(1),
@@ -22,6 +20,9 @@ type Reader = {
     state?: 'connected' | 'unavailable';
 };
 
+const readerConfiguration = z.object({ readerIds: z.array(z.string().min(1).max(64)) });
+const refreshInterval = 3_000;
+
 async function main() {
     const parsed = config.safeParse(process.env);
     if (!parsed.success) throw new Error('Invalid Kantech worker configuration');
@@ -30,14 +31,33 @@ async function main() {
     const abort = new AbortController();
     process.once('SIGTERM', () => abort.abort());
     process.once('SIGINT', () => abort.abort());
-    const readers = new Map<string, Reader>(settings.KANTECH_DOOR_IDS.map((id) => [
-        id, { acknowledged: new Set(), pending: new Map(), lastReport: 0 },
-    ]));
+    const readers = new Map<string, Reader>();
+    const headers = { Authorization: 'Bearer ' + settings.WORKER_SECRET_TOKEN };
+    const readersUrl = settings.KANTECH_REPORT_URL.replace(/\/+$/, '') + '/readers';
+    let refreshAt = 0;
 
     try {
         while (!abort.signal.aborted) {
             let failed = false;
+            if (Date.now() >= refreshAt) {
+                try {
+                    const response = await axios.get(readersUrl, {
+                        headers, timeout: 5_000, maxRedirects: 0, signal: abort.signal,
+                    });
+                    const ids = new Set(readerConfiguration.parse(response.data).readerIds);
+                    for (const id of readers.keys()) {
+                        if (!ids.has(id)) readers.delete(id);
+                    }
+                    for (const id of ids) {
+                        if (!readers.has(id)) readers.set(id, { acknowledged: new Set(), pending: new Map(), lastReport: 0 });
+                    }
+                } catch {
+                    failed = true;
+                }
+                refreshAt = Date.now() + refreshInterval;
+            }
             for (const [readerId, reader] of readers) {
+                if (abort.signal.aborted) break;
                 let state: 'connected' | 'unavailable' = 'connected';
                 try {
                     for (const event of await source.read(readerId)) {
@@ -53,7 +73,8 @@ async function main() {
                     await axios.post(settings.KANTECH_REPORT_URL, { readerId, state, events }, {
                         timeout: 25_000,
                         maxRedirects: 0,
-                        headers: { Authorization: 'Bearer ' + settings.WORKER_SECRET_TOKEN },
+                        headers,
+                        signal: abort.signal,
                     });
                     for (const event of events) {
                         reader.pending.delete(event.key);

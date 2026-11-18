@@ -102,7 +102,10 @@ try {
     Invoke-Docker @appCompose run --rm --no-deps backend npm run migrate
     $seedAdmin = 'INSERT INTO admins (id, username, "updatedAt") VALUES (''fixture-admin'', ''pilot-admin'', NOW()) ON CONFLICT (username) DO NOTHING'
     Invoke-Docker @dbCompose exec -T db psql -v ON_ERROR_STOP=1 -U zut -d planqr-db-prod -c $seedAdmin
-    Invoke-Docker @appCompose run --rm --no-deps -v "$($PSScriptRoot):/fixtures:ro" backend npm run attendance:configure -- /fixtures/assignments.json
+    $fixturesConfigured = Invoke-Docker @dbCompose exec -T db psql -v ON_ERROR_STOP=1 -U zut -d planqr-db-prod -tA -c 'SELECT EXISTS (SELECT 1 FROM "KantechReaderSetup")'
+    if ($fixturesConfigured -eq 'f') {
+        Invoke-Docker @appCompose run --rm --no-deps -v "$($PSScriptRoot):/fixtures:ro" backend npm run attendance:configure -- /fixtures/assignments.json
+    }
     Invoke-Docker @appCompose up -d --wait
 } finally {
     $env:KANTECH_MODE = $originalMode

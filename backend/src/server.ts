@@ -20,7 +20,7 @@ import path from "path";
 import { applyBasicSecurityHeaders } from "./middlewares/securityMiddleware";
 import { startLdapUserSyncJob } from "./jobs/ldapUserSyncJob";
 import { startPriorityMessageScheduleJob } from "./jobs/priorityMessageScheduleJob";
-import { kantechEvents, kantechIngress } from './routes/kantechRoutes';
+import { kantechEvents, kantechIngress, kantechReaders } from './routes/kantechRoutes';
 import { kantechDevRoutes } from './routes/kantechDevRoutes';
 import { startAttendanceJob } from './attendance/store';
 
@@ -58,6 +58,7 @@ app.use('/api/registry', registryRoutes);
 app.use('/api/Lesson', lessonRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/kantech/events', kantechEvents);
+app.use('/api/kantech/readers', kantechReaders);
 app.use('/api/kantech/dev', kantechDevRoutes);
 app.use('/internal/kantech', kantechIngress);
 app.use(statusRoutes);

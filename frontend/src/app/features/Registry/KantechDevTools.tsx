@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { findZutTeachers, type ZutTeacher } from "../../services/zutScheduleService";
 import { kantechTime, outcomeLabel } from "./kantechPresentation";
+import { KantechNavigation } from "./KantechNavigation";
 import "./KantechDevTools.css";
 
 type Card = { alias: string; login: string; name: string; album: string | null; scheduleId: string | null };
@@ -61,7 +61,8 @@ export default function KantechDevTools() {
   const [teacherNotice, setTeacherNotice] = useState("");
   const [teacherBusy, setTeacherBusy] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [reader, setReader] = useState("49919");
+  const [selectedReader, setReader] = useState<string>();
+  const reader = selectedReader ?? snapshot?.readers[0]?.id ?? "";
   const [scanAlias, setScanAlias] = useState("WISYNC_1");
   const [source, setSource] = useState<Source>("demo");
   const [granted, setGranted] = useState(true);
@@ -153,10 +154,7 @@ export default function KantechDevTools() {
   return (
     <main className="kantech-monitor">
       <div className="kantech-monitor__body">
-        <nav className="kantech-monitor__nav" aria-label="Widoki Kantecha">
-          <Link to="/adminpanel/kantech">Odczyty na żywo</Link>
-          <Link to="?dev=1" aria-current="page">Testy i przypisania</Link>
-        </nav>
+        <KantechNavigation view="dev" devTools />
         <header className="kantech-monitor__heading"><h1>Testy Kantecha</h1></header>
         {availability && <p role="status">{availability}</p>}
         {snapshot && <div className="kantech-dev">

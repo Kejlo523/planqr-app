@@ -1,7 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { FaArrowLeft } from "react-icons/fa";
-import { useTheme } from "../../../context/ThemeContext";
 import { findZutTeachers, type ZutTeacher } from "../../services/zutScheduleService";
 import { kantechTime, outcomeLabel } from "./kantechPresentation";
 import "./KantechDevTools.css";
@@ -52,7 +50,6 @@ function LessonList({ lessons, empty }: { lessons: Lesson[]; empty: string }) {
 }
 
 export default function KantechDevTools() {
-  const { theme } = useTheme();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [availability, setAvailability] = useState("Ładowanie trybu testowego…");
   const [assignment, setAssignment] = useState(initialAssignment);
@@ -154,10 +151,13 @@ export default function KantechDevTools() {
   };
 
   return (
-    <main className="admin-console kantech-monitor" data-admin-theme={theme}>
+    <main className="kantech-monitor">
       <div className="kantech-monitor__body">
-        <Link to="/adminpanel/kantech" className="kantech-monitor__back"><FaArrowLeft /> Kantech na żywo</Link>
-        <header className="kantech-monitor__heading"><h1>Testy Kantecha</h1><span className="kantech-monitor__mode">Tryb testowy</span></header>
+        <nav className="kantech-monitor__nav" aria-label="Widoki Kantecha">
+          <Link to="/adminpanel/kantech">Odczyty na żywo</Link>
+          <Link to="?dev=1" aria-current="page">Testy i przypisania</Link>
+        </nav>
+        <header className="kantech-monitor__heading"><h1>Testy Kantecha</h1></header>
         {availability && <p role="status">{availability}</p>}
         {snapshot && <div className="kantech-dev">
           <section className="kantech-dev__section" aria-labelledby="karte-mapping">

@@ -1,0 +1,77 @@
+.workspace-layout__content {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.workspace-layout .workspace-layout__desktop-trigger { display: none; }
+
+.workspace-layout {
+  --sidebar-duration: 290ms;
+  --sidebar-easing: cubic-bezier(.22, 1, .36, 1);
+}
+
+@media (min-width: 721px) {
+  .workspace-layout[data-sidebar] > .workspace-layout__content {
+    margin-left: 0;
+    transition: margin-left var(--sidebar-duration) var(--sidebar-easing);
+  }
+  .workspace-layout[data-sidebar="expanded"] > .workspace-layout__content {
+    margin-left: var(--admin-sidebar-width);
+  }
+
+  .workspace-layout[data-sidebar] > .admin-nav--desktop {
+    transform: translateX(0);
+    opacity: 1;
+    visibility: visible;
+    transition: transform var(--sidebar-duration) var(--sidebar-easing),
+      opacity 180ms ease, visibility 0s;
+  }
+
+  .workspace-layout[data-sidebar="collapsed"] > .admin-nav--desktop {
+    transform: translateX(-100%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition-delay: 0s, 0s, var(--sidebar-duration);
+  }
+
+  .workspace-layout .workspace-layout__desktop-trigger { display: inline-flex; }
+  .workspace-layout > .workspace-layout__mobile-overlay { display: none; }
+}
+
+@media (max-width: 720px) {
+  .workspace-layout__mobile-overlay {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease, visibility 0s var(--sidebar-duration);
+  }
+
+  .workspace-layout__mobile-overlay .admin-mobile-panel {
+    transform: translateX(-100%);
+    transition: transform var(--sidebar-duration) var(--sidebar-easing);
+  }
+
+  .workspace-layout__mobile-overlay[data-open="true"] {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+
+  .workspace-layout__mobile-overlay[data-open="true"] .admin-mobile-panel {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-layout[data-sidebar] > :is(.workspace-layout__content, .admin-nav--desktop),
+  .workspace-layout__mobile-overlay,
+  .workspace-layout__mobile-overlay .admin-mobile-panel {
+    transition-duration: 0s;
+    transition-delay: 0s;
+  }
+}

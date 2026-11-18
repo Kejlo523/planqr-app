@@ -47,6 +47,7 @@ interface FetchLessonAttendanceListParams {
   sessionId?: number | null;
   from?: string | null;
   to?: string | null;
+  signal?: AbortSignal;
 }
 
 interface AddAttendanceSessionUserParams {
@@ -67,6 +68,7 @@ export const fetchLessonAttendanceList = async ({
   sessionId,
   from,
   to,
+  signal,
 }: FetchLessonAttendanceListParams): Promise<LessonAttendanceList | null> => {
   const params = new URLSearchParams();
 
@@ -93,6 +95,7 @@ export const fetchLessonAttendanceList = async ({
       method: "GET",
       credentials: "include",
       cache: "no-store",
+      signal,
     },
   );
 

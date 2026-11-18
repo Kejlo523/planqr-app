@@ -1,28 +1,13 @@
 .attendance-page {
   min-height: 100dvh;
-  padding: 1.5rem;
 }
 
 .attendance-page__shell {
-  max-width: 980px;
+  width: min(100%, 980px);
+  padding: clamp(.75rem, 3vw, 1.75rem);
   margin: 0 auto;
   display: grid;
   gap: 1rem;
-}
-
-.attendance-page__back {
-  justify-self: flex-start;
-  min-height: 36px;
-  padding: 0.55rem 0.8rem;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--admin-radius);
-  background: var(--admin-surface);
-  color: var(--admin-text);
-  font: inherit;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  cursor: pointer;
 }
 
 .lesson-attendance {
@@ -237,10 +222,6 @@
 }
 
 @media (max-width: 720px) {
-  .attendance-page {
-    padding: 0.75rem;
-  }
-
   .lesson-attendance__header,
   .lesson-attendance__composer,
   .lesson-attendance__list-shell,

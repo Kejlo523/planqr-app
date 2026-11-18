@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { FaArrowLeft } from "react-icons/fa";
-import { useTheme } from "../../../context/ThemeContext";
+import { WorkspaceLayout } from "../../layout/WorkspaceLayout";
+import { useProtectedSession } from "../../router/ProtectedRoute";
+import { canOpenLecturerPlan } from "../../services/authService";
 import "./AdminRegistry.css";
 import "./KantechMonitor.css";
 import KantechDevTools from "./KantechDevTools";
@@ -27,11 +28,16 @@ export default function KantechMonitor() {
   const [params] = useSearchParams();
   const mode = params.get("dev");
   const dev = mode === "" || mode === "1" || mode === "true" || params.get("") === "dev";
-  return dev ? <KantechDevTools /> : <KantechLiveMonitor />;
+  const session = useProtectedSession();
+  return (
+    <WorkspaceLayout title="Kantech" login={session?.login} back={{ to: "/adminpanel", label: "Administracja" }}
+      navigation={{ ownPlan: canOpenLecturerPlan(session) }}>
+      {dev ? <KantechDevTools /> : <KantechLiveMonitor />}
+    </WorkspaceLayout>
+  );
 }
 
 function KantechLiveMonitor() {
-  const { theme } = useTheme();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState(false);
   const [forbidden, setForbidden] = useState(false);
@@ -71,16 +77,19 @@ function KantechLiveMonitor() {
 
   const events = snapshot?.events.filter((event) => !reader || reader === event.readerId) ?? [];
   return (
-    <main className="admin-console kantech-monitor" data-admin-theme={theme}>
+    <main className="kantech-monitor">
       <div className="kantech-monitor__body">
-        <Link to="/adminpanel" className="kantech-monitor__back"><FaArrowLeft /> Panel administratora</Link>
+        {snapshot?.devTools && (
+          <nav className="kantech-monitor__nav" aria-label="Widoki Kantecha">
+            <Link to="/adminpanel/kantech" aria-current="page">Odczyty na żywo</Link>
+            <Link to="?dev=1">Testy i przypisania</Link>
+          </nav>
+        )}
         <header className="kantech-monitor__heading">
           <div>
             <h1>Kantech na żywo</h1>
-            <p>Zdarzenia odczytane przez czytniki kart.</p>
           </div>
-          <div className="kantech-monitor__nav">
-            {snapshot?.devTools && <Link to="?dev=1" className="admin-button admin-button--ghost">Tryb testowy</Link>}
+          <div>
             <span className="kantech-monitor__mode">
               {snapshot?.mode === "observe" ? "Tryb obserwacji"
                 : snapshot?.mode === "attendance" ? "Zapis obecności"

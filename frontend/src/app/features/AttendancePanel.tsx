@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { FaArrowLeft } from "react-icons/fa";
+import { useLocation, useParams } from "react-router-dom";
+import { WorkspaceLayout } from "../layout/WorkspaceLayout";
+import { useProtectedSession } from "../router/ProtectedRoute";
+import { useAdminScrollRoot } from "./Registry/useAdminScrollRoot";
 import LessonAttendancePanel from "./attendance/LessonAttendancePanel";
 import {
   applyAttendanceListToDraft,
   createAttendanceDraft,
   type AttendanceDraft,
 } from "./attendance/attendanceDrafts";
-import { useTheme } from "../../context/ThemeContext";
+import { canOpenLecturerPlan } from "../services/authService";
 import {
   addAttendanceSessionUser,
   closeAttendanceSession,
@@ -19,8 +21,8 @@ import {
 export default function AttendancePanel() {
   const { lessonId } = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
-  const { theme } = useTheme();
+  useAdminScrollRoot();
+  const session = useProtectedSession();
   const searchParams = new URLSearchParams(location.search);
   const room =
     searchParams.get("room") || "Nieznana sala";
@@ -155,17 +157,10 @@ export default function AttendancePanel() {
   };
 
   return (
-    <div className="admin-console attendance-page" data-admin-theme={theme}>
-      <div className="attendance-page__shell">
-        <button
-          type="button"
-          className="attendance-page__back"
-          onClick={() => navigate(-1)}
-        >
-          <FaArrowLeft />
-          Wróć do planu zajęć
-        </button>
-
+    <WorkspaceLayout className="attendance-page" title="Obecność" login={session?.login}
+      back={{ to: "/lecturerPlan", label: "Mój plan" }}
+      navigation={session?.access.isAdmin ? { ownPlan: canOpenLecturerPlan(session) } : undefined}>
+      <main className="attendance-page__shell">
         <LessonAttendancePanel
           layout="page"
           lessonId={lessonId}
@@ -181,7 +176,7 @@ export default function AttendancePanel() {
           onAddRow={(albumNumber, enteredAt) => void addCurrentSessionUser(albumNumber, enteredAt)}
           onRemoveRow={(rowId, userId) => void removeCurrentSessionUser(rowId, userId)}
         />
-      </div>
-    </div>
+      </main>
+    </WorkspaceLayout>
   );
 }

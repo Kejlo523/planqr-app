@@ -126,6 +126,40 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.mouse.move(8, 400);
         await page.mouse.wheel(0, 850);
         await page.waitForFunction(() => window.scrollY > 0);
+        await page.getByRole('button', { name: 'Otwórz sekcje panelu' }).click();
+        await page.getByRole('link', { name: 'Parowanie kodem QR' }).click();
+        const pairing = page.getByRole('dialog', { name: 'Tryb parowania' });
+        await pairing.getByRole('button', { name: 'Wyjdź z trybu parowania' }).click();
+        await pairing.waitFor({ state: 'hidden' });
+
+        await page.setViewportSize({ width: 1560, height: 810 });
+        await page.clock.setFixedTime(new Date('2026-11-18T11:00:00+01:00'));
+        const lessonTitle = 'Warsztat danych';
+        const lessonDate = '2026-11-20';
+        await page.route(/\/api\/schedule\?kind=worker/, (route) => {
+            const range = new URL(route.request().url()).searchParams;
+            const inRange = lessonDate >= range.get('start').slice(0, 10)
+                && lessonDate < range.get('end').slice(0, 10);
+            return route.fulfill({ json: inRange ? [{
+                id: '357162', title: lessonTitle, room: 'WI WI1- 313',
+                start: lessonDate + 'T10:15:00+01:00', end: lessonDate + 'T11:45:00+01:00',
+            }] : [] });
+        });
+        await page.route(/\/api\/attendance\/list\?/, (route) =>
+            route.fulfill({ status: 404, json: { message: 'Attendance session not found' } }));
+        await page.goto(url + '/lecturerPlan?mode=admin-preview&fullName=Prowadzacy+Testowy');
+        await page.getByRole('button', { name: /Warsztat danych/ }).click();
+        const lessonHeading = page.getByRole('heading', { name: lessonTitle, exact: true });
+        await lessonHeading.waitFor();
+        await page.getByRole('button', { name: 'Panel obecności', exact: true }).click();
+        const attendance = page.locator('.lesson-attendance');
+        await attendance.getByText('Dla tych zajęć nie ma jeszcze sesji obecności.').waitFor();
+        await page.setViewportSize({ width: 390, height: 720 });
+        await page.locator('.lecturer-console__drawer--attendance').getByText('Lista obecności', { exact: true }).waitFor();
+        await attendance.getByRole('button', { name: 'Zamknij panel obecności' }).click();
+        await lessonHeading.waitFor();
+        await page.getByRole('button', { name: 'Zamknij panel zajęć' }).click();
+        await lessonHeading.waitFor({ state: 'hidden' });
         console.log('Browser monitor, LDAP session and XLSX download passed.');
     } finally {
         await browser.close();

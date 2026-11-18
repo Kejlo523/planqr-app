@@ -6,6 +6,7 @@ import "./AdminRegistry.css";
 import "./KantechMonitor.css";
 import KantechDevTools from "./KantechDevTools";
 import { kantechTime as time, outcomeLabel } from "./kantechPresentation";
+import { useAdminScrollRoot } from "./useAdminScrollRoot";
 
 interface Snapshot {
   mode: "off" | "observe" | "attendance";
@@ -22,6 +23,7 @@ interface Snapshot {
 }
 
 export default function KantechMonitor() {
+  useAdminScrollRoot();
   const [params] = useSearchParams();
   const mode = params.get("dev");
   const dev = mode === "" || mode === "1" || mode === "true" || params.get("") === "dev";

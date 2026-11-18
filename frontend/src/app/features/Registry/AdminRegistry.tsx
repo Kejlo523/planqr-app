@@ -8,6 +8,7 @@ import {
   type SessionInfo,
 } from "../../services/authService";
 import "./AdminRegistry.css";
+import { useAdminScrollRoot } from "./useAdminScrollRoot";
 import { useTheme } from "../../../context/ThemeContext";
 import AdminPairingScanner from "./adminPanel/AdminPairingScanner";
 import AdminPanelSidebar from "./adminPanel/AdminPanelSidebar";
@@ -52,7 +53,6 @@ import type {
   } from "./adminPanel/types";
 
 const TOAST_DURATION_MS = 5000;
-const ADMIN_SCROLL_ROOT_CLASS = "admin-console-scroll-root";
 const MOBILE_BREAKPOINT_PX = 720;
 const SCROLL_TOP_VISIBILITY_THRESHOLD_PX = 160;
 const SCROLL_TOP_TOAST_GAP_PX = 12;
@@ -322,15 +322,7 @@ const AdminRegistry = () => {
     setVisibleDeviceIds((current) => (current.length === 0 ? current : []));
   }, [activeDevices.length]);
 
-  useEffect(() => {
-    document.documentElement.classList.add(ADMIN_SCROLL_ROOT_CLASS);
-    document.body.classList.add(ADMIN_SCROLL_ROOT_CLASS);
-
-    return () => {
-      document.documentElement.classList.remove(ADMIN_SCROLL_ROOT_CLASS);
-      document.body.classList.remove(ADMIN_SCROLL_ROOT_CLASS);
-    };
-  }, []);
+  useAdminScrollRoot();
 
   useEffect(() => {
     if (drawerDeviceId !== null && !drawerDevice) {

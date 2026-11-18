@@ -121,6 +121,11 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByText('Otwarto listę', { exact: false }).first().waitFor();
         await page.getByRole('button', { name: 'WISYNC_2 · Student' }).click();
         await page.getByText('Dopisano obecność', { exact: false }).first().waitFor();
+        await page.setViewportSize({ width: 400, height: 720 });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await page.mouse.move(8, 400);
+        await page.mouse.wheel(0, 850);
+        await page.waitForFunction(() => window.scrollY > 0);
         console.log('Browser monitor, LDAP session and XLSX download passed.');
     } finally {
         await browser.close();

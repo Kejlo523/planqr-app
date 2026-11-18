@@ -403,9 +403,9 @@ const DevicesView = ({
           ) : undefined
         }
       >
-        {selectedCount > 0 && (
+        {hasPairedDevices && (
           <details className="admin-devices-view__selection">
-            <summary>Operacje dla zaznaczonych ({selectedCount})</summary>
+            <summary>Operacje zbiorowe · Zaznaczone: {selectedCount}</summary>
             <div className="admin-batch-panel">
               <div className="admin-table__batch-actions">{batchActionsContent}</div>
             </div>

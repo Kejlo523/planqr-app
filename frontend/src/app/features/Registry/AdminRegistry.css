@@ -83,16 +83,6 @@ body.admin-console-scroll-root #root {
     flex: 1;
     min-height: 0;
   }
-
-  .admin-devices-view__list .admin-devices-grid {
-    flex: 1 1 auto;
-    width: 100%;
-    min-height: 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
 }
 
 .admin-console[data-admin-theme="light"] {
@@ -2272,9 +2262,8 @@ body.admin-console-scroll-root #root {
 .admin-devices-grid__theme.ag-theme-quartz,
 .admin-devices-grid__theme.ag-theme-quartz-dark {
   width: 100%;
-  height: 100%;
-  min-height: 0;
-  flex: 1 1 auto;
+  height: clamp(24rem, 54dvh, 38rem);
+  flex: 0 0 auto;
   --admin-grid-scroll-size: 10px;
   border: 1px solid var(--admin-border);
   border-radius: var(--admin-radius);
@@ -4052,17 +4041,6 @@ body.admin-console-scroll-root #root {
     flex: 0 0 auto;
     min-height: 0;
   }
-
-  .admin-devices-view__list .admin-devices-grid,
-  .admin-devices-view__list .admin-devices-grid__theme.ag-theme-quartz,
-  .admin-devices-view__list .admin-devices-grid__theme.ag-theme-quartz-dark {
-    height: auto;
-  }
-
-  .admin-devices-view__list .admin-devices-grid__theme.ag-theme-quartz,
-  .admin-devices-view__list .admin-devices-grid__theme.ag-theme-quartz-dark {
-    min-height: clamp(24rem, 52dvh, 38rem);
-  }
 }
 
 @media (min-width: 721px) and (max-width: 1280px) {
@@ -4103,8 +4081,7 @@ body.admin-console-scroll-root #root {
     min-height: 0;
   }
 
-  .admin-devices-view__list .admin-table__wrapper--active,
-  .admin-devices-view__list .admin-devices-grid {
+  .admin-devices-view__list .admin-table__wrapper--active {
     flex: 1 1 auto;
     min-height: 0;
     height: 100%;
@@ -4254,19 +4231,9 @@ body.admin-console-scroll-root #root {
     flex: 1 1 auto;
   }
 
-  .admin-devices-view__list .admin-devices-grid {
-    flex: 1 1 auto;
-    min-height: 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .admin-devices-view__list .admin-devices-grid__theme.ag-theme-quartz,
-  .admin-devices-view__list .admin-devices-grid__theme.ag-theme-quartz-dark {
-    flex: 1 1 auto;
+  .admin-devices-grid__theme.ag-theme-quartz,
+  .admin-devices-grid__theme.ag-theme-quartz-dark {
     height: clamp(22rem, 68dvh, 34rem);
-    min-height: 22rem;
   }
 
   .admin-toolbar {
@@ -4838,8 +4805,7 @@ body.admin-console-scroll-root #root {
 
 .admin-devices-view__selection {
   padding: .65rem .8rem;
-  background: var(--admin-accent-soft);
-  border-bottom: 1px solid var(--admin-accent-border);
+  border-bottom: 1px solid var(--admin-border);
   color: var(--admin-text);
 }
 

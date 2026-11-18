@@ -1,4 +1,5 @@
 import { AttendanceMember, AttendanceSession, Prisma } from '@prisma/client';
+import { auditAction } from '../middlewares/auditMiddleware';
 import { Response, Router } from 'express';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
@@ -152,7 +153,7 @@ router.get('/pending', handle(async (req, res) => {
     })));
 }));
 
-router.post('/pending/:id/choose', handle(async (req, res) => {
+router.post('/pending/:id/choose', auditAction('ATTENDANCE', 'Wybrano zajęcia dla listy obecności', () => undefined), handle(async (req, res) => {
     const key = z.string().min(1).max(400).parse(req.body?.key);
     const where = { id: req.params.id, login: owner(req).ownerLogin };
     const outcomes = await attendanceDb.$transaction(async (tx) => {
@@ -172,7 +173,7 @@ router.post('/pending/:id/choose', handle(async (req, res) => {
     res.sendStatus(204);
 }));
 
-router.post('/sessions/:id/close', handle(async (req, res) => {
+router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę obecności'), handle(async (req, res) => {
     const outcomes = await editSession(req, async (tx, session) => {
         const now = new Date();
         if (session.closesAt <= now) return;
@@ -189,7 +190,7 @@ router.post('/sessions/:id/close', handle(async (req, res) => {
     res.json(sessionView(session));
 }));
 
-router.post('/sessions/:id/send', handle(async (req, res) => {
+router.post('/sessions/:id/send', auditAction('ATTENDANCE', 'Przygotowano listę obecności do wysyłki'), handle(async (req, res) => {
     const updated = await editSession(req, async (tx, session) => {
         if (sessionStatus(session) === 'open') throw new RequestError(409, 'Close the attendance session first');
         return tx.attendanceSession.update({
@@ -199,7 +200,7 @@ router.post('/sessions/:id/send', handle(async (req, res) => {
     res.json(sessionView(updated));
 }));
 
-router.post('/sessions/:id/users', handle(async (req, res) => {
+router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do listy obecności'), handle(async (req, res) => {
     const payload = memberBody.parse(req.body);
     const result = await editSession(req, async (tx, session) => {
         if (sessionStatus(session) !== 'open') throw new RequestError(409, 'Attendance session is closed');
@@ -224,7 +225,7 @@ router.post('/sessions/:id/users', handle(async (req, res) => {
     res.status(201).json({ user: memberView(result) });
 }));
 
-router.delete('/sessions/:id/users/:userId', handle(async (req, res) => {
+router.delete('/sessions/:id/users/:userId', auditAction('ATTENDANCE', 'Usunięto osobę z listy obecności'), handle(async (req, res) => {
     const userId = idSchema.parse(req.params.userId);
     await editSession(req, async (tx, session) => {
         if (sessionStatus(session) !== 'open') throw new RequestError(409, 'Attendance session is closed');

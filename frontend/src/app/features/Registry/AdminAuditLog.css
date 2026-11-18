@@ -1,0 +1,38 @@
+.admin-audit__retention,
+.admin-audit__filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: .7rem;
+  padding: .9rem 1rem;
+}
+
+.admin-audit__retention p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--admin-text-muted);
+  font-size: .86rem;
+}
+
+.admin-audit__filters { border-bottom: 1px solid var(--admin-border); }
+.admin-audit__search { display: flex; align-items: flex-end; gap: .5rem; flex: 1 1 18rem; }
+.admin-audit__search .admin-form-field { flex: 1; min-width: 0; }
+.admin-audit__status { margin: 0; padding: 1.35rem 1rem; color: var(--admin-text-muted); }
+.admin-audit .admin-table time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.admin-audit__pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .7rem 1rem;
+  border-top: 1px solid var(--admin-border);
+}
+.admin-audit__pagination span { margin-right: auto; color: var(--admin-text-muted); font-size: .85rem; }
+
+@media (max-width: 720px) {
+  .admin-audit__retention > label { flex: 1 1 10rem; }
+  .admin-audit__filters > label { flex: 1 1 9rem; min-width: 0; }
+  .admin-audit .admin-table { min-width: 38rem; }
+}

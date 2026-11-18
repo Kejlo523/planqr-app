@@ -18,7 +18,8 @@ interface AdminPanelSidebarProps {
   groups: AdminNavigationGroup[];
   onItemSelect: (key: AdminNavigationKey) => void;
   onLinkSelect?: () => void;
-  id?: string;
+  ariaLabel: string;
+  compact?: boolean;
   unavailable?: boolean;
   className?: string;
 }
@@ -27,14 +28,14 @@ const AdminPanelSidebar = ({
   groups,
   onItemSelect,
   onLinkSelect,
-  id,
+  ariaLabel,
+  compact = false,
   unavailable = false,
   className,
 }: AdminPanelSidebarProps) => (
   <nav
     className={["admin-nav", className].filter(Boolean).join(" ")}
-    aria-label="Widoki panelu administracyjnego"
-    id={id}
+    aria-label={ariaLabel}
     aria-hidden={unavailable || undefined}
   >
     {groups.map(({ label, items }) => (
@@ -42,11 +43,12 @@ const AdminPanelSidebar = ({
         <h2 className="admin-nav__section-title">{label}</h2>
         <ul className="admin-nav__list">
           {items.map((item) => {
-            const content = <><i className={item.icon} aria-hidden="true" /><span>{item.label}</span></>;
+            const content = <><i className={item.icon} aria-hidden="true" /><span className="admin-nav__label">{item.label}</span></>;
             return (
               <li key={item.key} className="admin-nav__item">
                 {item.to !== undefined ? (
                   <Link to={item.to} className="admin-nav__button"
+                    title={compact ? item.label : undefined}
                     aria-current={item.active ? "page" : undefined}
                     tabIndex={unavailable ? -1 : undefined}
                     onClick={onLinkSelect}>{content}</Link>
@@ -54,6 +56,7 @@ const AdminPanelSidebar = ({
                   <button
                     type="button"
                     className="admin-nav__button"
+                    title={compact ? item.label : undefined}
                     onClick={() => onItemSelect(item.key)}
                     aria-current={item.active ? "page" : undefined}
                     tabIndex={unavailable ? -1 : undefined}

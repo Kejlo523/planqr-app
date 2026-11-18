@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { auditAction } from '../middlewares/auditMiddleware';
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
@@ -120,7 +121,7 @@ kantechReaders.get('/', async (_req, res) => {
     }
 });
 
-kantechReaders.post('/', async (req, res) => {
+kantechReaders.post('/', auditAction('KANTECH', 'Zapisano czytnik', (req) => req.body?.id), async (req, res) => {
     const input = readerInput.safeParse(req.body);
     if (!input.success) {
         const assignmentError = input.error.issues.find(({ code }) => code === 'custom');
@@ -138,7 +139,7 @@ kantechReaders.post('/', async (req, res) => {
     }
 });
 
-kantechReaders.delete('/:id', async (req, res) => {
+kantechReaders.delete('/:id', auditAction('KANTECH', 'Usunięto czytnik'), async (req, res) => {
     const id = readerIdSchema.safeParse(req.params.id);
     if (!id.success) {
         res.status(400).json({ message: 'Nieprawidłowe ID czytnika.' });

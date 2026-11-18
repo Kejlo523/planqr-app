@@ -93,18 +93,6 @@ body.admin-console-scroll-root #root {
     flex-direction: column;
   }
 
-  .admin-console .admin-nav--desktop {
-    position: fixed;
-    top: var(--admin-appbar-height);
-    left: 0;
-    bottom: 0;
-    z-index: 35;
-    width: var(--admin-sidebar-width);
-    max-height: none;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
 }
 
 .admin-console[data-admin-theme="light"] {
@@ -181,7 +169,6 @@ body.admin-console-scroll-root #root {
 }
 
 .admin-nav {
-  border-right: 1px solid var(--admin-border);
   background: var(--pq-nav);
   padding: 1.35rem .85rem;
   align-self: stretch;
@@ -193,7 +180,6 @@ body.admin-console-scroll-root #root {
 }
 
 .admin-nav--mobile {
-  border-right: 0;
   background: transparent;
   padding: 0;
   gap: 0.5rem;
@@ -244,6 +230,7 @@ body.admin-console-scroll-root #root {
 
 .admin-nav__button i {
   width: 1rem;
+  flex-shrink: 0;
   text-align: center;
 }
 
@@ -4663,10 +4650,6 @@ body.admin-console-scroll-root #root {
     position: sticky;
     top: 0;
     z-index: 35;
-  }
-
-  .admin-nav--desktop {
-    display: none;
   }
 
   .admin-console__appbar .admin-console__mobile-trigger {

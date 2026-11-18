@@ -1,4 +1,5 @@
 import { Response, Router } from 'express';
+import { auditAction } from '../middlewares/auditMiddleware';
 import { z } from 'zod';
 import { AuthRequest, requireLdapAdmin } from '../middlewares/authMiddleware';
 import { attendanceScanRateLimiter } from '../middlewares/securityMiddleware';
@@ -53,7 +54,7 @@ kantechDevRoutes.get('/', api(async (req, res) => {
     res.json({ cards, readers, observed: getObservedAliases(), simulated: getSimulation(owner(req)) });
 }));
 
-kantechDevRoutes.post('/cards', api(async (req, res) => {
+kantechDevRoutes.post('/cards', auditAction('KANTECH', 'Zapisano przypisanie karty'), api(async (req, res) => {
     const input = mapping.parse(req.body);
     const target = input.role === 'lecturer' ? input.login : input.target;
     const data = {

@@ -2486,7 +2486,7 @@ const AdminRegistry = () => {
     <WorkspaceLayout
       title="Administracja"
       login={session?.login}
-      onLogout={() => void handleLogout()}
+      onLogout={handleLogout}
       navigation={{ ownPlan: canOpenLecturerPlan(session), currentView, onSelect: handleNavigationSelect }}
     >
       <main

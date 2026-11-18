@@ -1743,7 +1743,7 @@ export default function LecturerCalendar() {
       login={session?.login}
       back={session?.access.isAdmin ? { to: "/adminpanel", label: "Administracja" } : undefined}
       navigation={session?.access.isAdmin ? { ownPlan: canOpenLecturerPlan(session) } : undefined}
-      onLogout={() => void handleLogout()}
+      onLogout={handleLogout}
     >
       <div className="lecturer-console__shell" ref={workspaceRef}>
         <main className="lecturer-console__workspace">

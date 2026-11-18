@@ -173,7 +173,25 @@ async function browserSmoke(api, simulator, password, directory) {
         page.once('dialog', (dialog) => dialog.accept());
         await page.getByRole('button', { name: 'Usuń czytnik 49998' }).click();
         await page.getByText('Usunięto czytnik 49998.').waitFor();
-        console.log('Browser monitor, LDAP session and XLSX download passed.');
+
+        await page.setViewportSize({ width: 1366, height: 800 });
+        await page.getByRole('link', { name: 'Logi', exact: true }).click();
+        await page.getByRole('heading', { name: 'Logi', exact: true }).waitFor();
+        const audit = '/api/audit?limit=50';
+        const beforeSearch = await waitFor('reader deletion in audit', async () => {
+            const { entries } = await (await page.request.get(url + audit)).json();
+            return entries[0]?.target === '49998' && entries[0].action === 'Usunięto czytnik' && entries[0].id;
+        });
+        assert.ok((await page.request.get(url + '/schedule.php?kind=teacher&query=Prowadzacy')).ok());
+        const afterSearch = await (await page.request.get(url + audit)).json();
+        assert.equal(afterSearch.entries[0].id, beforeSearch);
+        await page.getByLabel('Wpisy na stronie').selectOption('25');
+        await page.getByLabel('Obszar').selectOption('AUTH');
+        await page.getByRole('cell', { name: 'Zalogowano się', exact: true }).first().waitFor();
+        await page.setViewportSize({ width: 390, height: 720 });
+        assert.ok(await page.getByLabel('Okres przechowywania w dniach').isVisible());
+        assert.ok(await page.getByRole('table', { name: 'Dziennik działań w PlanQR' }).isVisible());
+        console.log('Browser monitor, LDAP session, XLSX download and audit filters passed.');
     } finally {
         await browser.close();
         await stop(preview);
@@ -435,6 +453,57 @@ async function main() {
         assert.ok((await request(api + file.imageUrl)).ok);
         console.log('Tablet and upload regression checks passed.');
 
+        const audit = api + '/api/audit';
+        const retention = audit + '/retention';
+        const events = async (query = '') => {
+            const response = await request(audit + query, { headers });
+            assert.equal(response.status, 200);
+            return response.json();
+        };
+        assert.equal((await request(audit)).status, 401);
+        assert.equal((await request(audit, { headers: authenticatedLecturer })).status, 403);
+        assert.equal((await request(retention, { method: 'PUT', json: { days: 7 }, headers: authenticatedLecturer })).status, 403);
+        assert.equal((await request(audit + '?limit=201', { headers })).status, 400);
+        assert.equal((await request(retention, { method: 'PUT', json: { days: 0 }, headers })).status, 400);
+        await waitFor('tablet creation in audit', async () => (await events('?category=TABLETS')).entries.some(
+            ({ actor, action, target }) => actor === 'pilot-admin' && action === 'Dodano tablet' && target === 'TEST 201'));
+        const first = await events('?limit=1');
+        assert.equal(first.retentionDays, 30);
+        assert.equal(first.entries.length, 1);
+        assert.equal(first.nextBefore, first.entries[0].id);
+        const older = await events('?limit=1&before=' + first.nextBefore);
+        assert.ok(older.entries[0].id < first.entries[0].id);
+        assert.ok((await events('?category=AUTH&query=PILOT-ADMIN')).entries.some(({ action }) => action === 'Zalogowano się'));
+        assert.deepEqual((await events('?query=%25')).entries, []);
+
+        assert.equal((await request(api + '/api/auth/logout', { method: 'POST', headers: authenticatedLecturer })).status, 200);
+        const beforeScan = await waitFor('logout in audit', async () => {
+            const { entries } = await events('?limit=1');
+            return entries[0]?.actor === 'lecturer-two' && entries[0].action === 'Wylogowano się' && entries[0].id;
+        });
+        await emit('WISYNC_2', at(-172_799), '49920');
+        await waitFor('test card scan in Kantech only', async () => (await live()).events.some(
+            ({ readerId, occurredAt }) => readerId === '49920' && new Date(occurredAt).toISOString() === at(-172_799)));
+        assert.equal((await events('?limit=1')).entries[0].id, beforeScan);
+
+        const auditSql = new Client({ connectionString: database.href });
+        await auditSql.connect();
+        try {
+            await auditSql.query(`INSERT INTO "AuditEvent" ("occurredAt", category, actor, action)
+                VALUES (NOW() - INTERVAL '10 days', 'ADMIN', 'fixture', 'aged fixture')`);
+            assert.equal((await events('?query=aged+fixture')).entries.length, 1);
+            const saved = await request(retention, { method: 'PUT', headers, json: { days: 7 } });
+            assert.equal(saved.status, 200);
+            assert.deepEqual(await saved.json(), { retentionDays: 7, removed: 1 });
+            const retained = await auditSql.query('SELECT id FROM "AuditEvent" WHERE actor = $1', ['fixture']);
+            assert.equal(retained.rowCount, 0);
+            assert.ok((await events('?category=ADMIN')).entries.some(({ action, target }) =>
+                action === 'Zmieniono okres przechowywania logów' && target === '30 → 7 dni'));
+        } finally {
+            await auditSql.end();
+        }
+        console.log('Audit access, useful events, pagination, scan exclusion and automatic retention passed.');
+
         for (const id of ['49919', '49920']) {
             assert.equal((await request(readersApi + '/' + id, { headers, method: 'DELETE' })).status, 204);
         }
@@ -443,6 +512,7 @@ async function main() {
         headers = await authenticate();
         assert.deepEqual((await (await request(workerReaders, { headers: service })).json()).readerIds, []);
         assert.equal((await list(9001)).status, 200);
+        assert.equal((await events('?limit=1')).retentionDays, 7);
         console.log('Reader changes reach the worker, deletions survive restart and attendance history remains available.');
     } finally {
         await Promise.all([...processes].map(stop));

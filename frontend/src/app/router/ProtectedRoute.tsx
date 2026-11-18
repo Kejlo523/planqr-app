@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { createContext, useContext, type ReactNode, useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { canOpenLecturerPlan, fetchSession, type SessionInfo } from '../services/authService';
 
@@ -9,6 +9,10 @@ interface ProtectedRouteProps {
   requirement: AccessRequirement;
   children: ReactNode;
 }
+
+const ProtectedSessionContext = createContext<SessionInfo | null>(null);
+
+export const useProtectedSession = () => useContext(ProtectedSessionContext);
 
 const hasRequiredAccess = (session: SessionInfo, requirement: AccessRequirement) => {
   if (requirement === 'admin') {
@@ -69,5 +73,5 @@ export default function ProtectedRoute({ requirement, children }: ProtectedRoute
     return <Navigate to="/access-denied" replace state={{ reason: accessDeniedReason }} />;
   }
 
-  return <>{children}</>;
+  return <ProtectedSessionContext.Provider value={session}>{children}</ProtectedSessionContext.Provider>;
 }

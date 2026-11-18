@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import logo from "../../assets/ZUT_Logo.png";
+import { PlanQrBrand } from "./WorkspaceHeader";
+import { FaArrowRight } from "react-icons/fa";
 import ThemeToggle from "./ThemeToggle";
+import "./LoginPanel.css";
 import { fetchSession, getPreferredRoute } from "../services/authService";
 
 type LoginErrorPayload = {
@@ -42,6 +44,7 @@ export default function LoginPanel() {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const navigate = useNavigate();
@@ -110,6 +113,7 @@ export default function LoginPanel() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setErrorMessage("");
+    setSubmitting(true);
 
     try {
       const response = await fetch('/api/auth/login', {
@@ -134,72 +138,69 @@ export default function LoginPanel() {
         return;
       }
 
-      if (response.status === 403) {
-        setErrorMessage(getLoginErrorMessage(response.status, data));
-        return;
-      }
-
       setErrorMessage(getLoginErrorMessage(response.status, data));
     } catch (error) {
       console.error("Error during login:", error);
       setErrorMessage("Wystąpił błąd podczas logowania. Spróbuj ponownie.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className={`login-panel${isEditing ? " login-panel--editing" : ""}`}>
-      <div className="login-panel__theme-toggle">
-        <ThemeToggle />
-      </div>
-      <form
-        ref={formRef}
-        className="login-panel__form"
-        onSubmit={handleSubmit}
-        onFocusCapture={() => setIsEditing(true)}
-        onBlurCapture={() => {
-          window.requestAnimationFrame(() => {
-            if (!formRef.current?.contains(document.activeElement)) {
-              setIsEditing(false);
-            }
-          });
-        }}
-      >
-        <div className="login-panel__header">
-          <img src={logo} alt="ZUT Logo" className="login-panel__logo" />
+    <main className="login-panel">
+      <aside className="login-panel__introduction">
+        <div className="login-panel__institution">Zachodniopomorski Uniwersytet Technologiczny w Szczecinie</div>
+        <p className="login-panel__statement">Plan zajęć.<br />Sale i obecność.</p>
+        <div className="login-panel__timetable" aria-hidden="true">
+          <span /><span /><span /><span /><span />
         </div>
-        <div className="login-panel__input-group-wrapper">
-          <div className="login-panel__input-group">
-            <span className="login-panel__icon">
-              <i className="fas fa-envelope"></i>
-            </span>
+      </aside>
+      <section className="login-panel__workspace">
+        <header className="login-panel__bar">
+          <PlanQrBrand />
+          <ThemeToggle />
+        </header>
+        <form
+          ref={formRef}
+          className="login-panel__form"
+          onSubmit={handleSubmit}
+          onFocusCapture={() => setIsEditing(true)}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setIsEditing(false);
+          }}
+        >
+          <h1>Zaloguj się</h1>
+          <p>Użyj danych konta uczelnianego ZUT.</p>
+          <label className="login-panel__field">
+            Login uczelniany
             <input
               type="text"
-              className="login-panel__input"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
               placeholder="Twój login"
               required
               value={login}
-              onChange={(e) => setLogin(e.target.value)}
+              onChange={(event) => setLogin(event.target.value)}
             />
-          </div>
-          <div className="login-panel__input-group">
-            <span className="login-panel__icon">
-              <i className="fas fa-lock"></i>
-            </span>
+          </label>
+          <label className="login-panel__field">
+            Hasło
             <input
               type="password"
-              className="login-panel__input"
-              placeholder="Hasło"
+              autoComplete="current-password"
               required
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
             />
-          </div>
-        </div>
-        <button type="submit" className="login-panel__btn">Zaloguj</button>
-        {errorMessage ? (
-          <p style={{ marginTop: '1rem', color: '#dc2626', textAlign: 'center' }}>{errorMessage}</p>
-        ) : null}
-      </form>
-    </div>
+          </label>
+          {errorMessage && <p className="login-panel__error" role="alert">{errorMessage}</p>}
+          <button type="submit" className="login-panel__btn" disabled={isSubmitting}>
+            {isSubmitting ? "Logowanie…" : "Zaloguj"} <FaArrowRight aria-hidden="true" />
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }

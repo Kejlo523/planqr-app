@@ -61,8 +61,11 @@ export async function simulateScan(login: string, input: SimulationInput) {
         event.outcome = 'unknown_card';
     } else if (input.source === 'live' && !reader) {
         event.outcome = 'unknown_reader';
+    } else if (input.source === 'live' && (!reader?.buildingId || !reader.roomNumber)) {
+        event.outcome = 'reader_without_room';
     } else {
-        const roomKey = reader ? getRoomKey(reader.buildingId, reader.roomNumber) : input.readerId;
+        const roomKey = reader?.buildingId && reader.roomNumber
+            ? getRoomKey(reader.buildingId, reader.roomNumber) : input.readerId;
         const demoStart = Date.parse(events.find((item) => item.source === 'demo')?.occurredAt ?? event.occurredAt);
         const candidates = card.scheduleId ? input.source === 'demo' ? [{
             id: 'demo', key: 'demo-session', title: 'Zajęcia testowe',

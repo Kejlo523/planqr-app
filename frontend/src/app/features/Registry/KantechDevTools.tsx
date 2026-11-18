@@ -1,9 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
-import { FaArrowLeft } from "react-icons/fa";
-import { useTheme } from "../../../context/ThemeContext";
 import { findZutTeachers, type ZutTeacher } from "../../services/zutScheduleService";
 import { kantechTime, outcomeLabel } from "./kantechPresentation";
+import { KantechNavigation } from "./KantechNavigation";
 import "./KantechDevTools.css";
 
 type Card = { alias: string; login: string; name: string; album: string | null; scheduleId: string | null };
@@ -52,7 +50,6 @@ function LessonList({ lessons, empty }: { lessons: Lesson[]; empty: string }) {
 }
 
 export default function KantechDevTools() {
-  const { theme } = useTheme();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [availability, setAvailability] = useState("Ładowanie trybu testowego…");
   const [assignment, setAssignment] = useState(initialAssignment);
@@ -64,7 +61,8 @@ export default function KantechDevTools() {
   const [teacherNotice, setTeacherNotice] = useState("");
   const [teacherBusy, setTeacherBusy] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [reader, setReader] = useState("49919");
+  const [selectedReader, setReader] = useState<string>();
+  const reader = selectedReader ?? snapshot?.readers[0]?.id ?? "";
   const [scanAlias, setScanAlias] = useState("WISYNC_1");
   const [source, setSource] = useState<Source>("demo");
   const [granted, setGranted] = useState(true);
@@ -154,10 +152,10 @@ export default function KantechDevTools() {
   };
 
   return (
-    <main className="admin-console kantech-monitor" data-admin-theme={theme}>
+    <main className="kantech-monitor">
       <div className="kantech-monitor__body">
-        <Link to="/adminpanel/kantech" className="kantech-monitor__back"><FaArrowLeft /> Kantech na żywo</Link>
-        <header className="kantech-monitor__heading"><h1>Testy Kantecha</h1><span className="kantech-monitor__mode">Tryb testowy</span></header>
+        <KantechNavigation view="dev" devTools />
+        <header className="kantech-monitor__heading"><h1>Testy Kantecha</h1></header>
         {availability && <p role="status">{availability}</p>}
         {snapshot && <div className="kantech-dev">
           <section className="kantech-dev__section" aria-labelledby="karte-mapping">

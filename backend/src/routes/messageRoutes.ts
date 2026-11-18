@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { auditAction } from '../middlewares/auditMiddleware';
 import { MessageController } from '../controllers/MessageController';
 import { requireAdmin, requireAuth, requireLecturerAccess } from '../middlewares/authMiddleware';
 import { publicMessagesRateLimiter } from '../middlewares/securityMiddleware';
@@ -47,7 +48,7 @@ const router = Router();
  *       500:
  *         description: Server error
  */
-router.post('/', requireLecturerAccess, MessageController.createMessage);
+router.post('/', requireLecturerAccess, auditAction('MESSAGES', 'Dodano wiadomość'), MessageController.createMessage);
 
 /**
  * @swagger
@@ -108,7 +109,7 @@ router.get('/:lessonId', publicMessagesRateLimiter, MessageController.getMessage
  *       409:
  *         description: Room change messages are not editable
  */
-router.patch('/:id', requireAuth, MessageController.updateMessage);
+router.patch('/:id', requireAuth, auditAction('MESSAGES', 'Edytowano wiadomość'), MessageController.updateMessage);
 
 /**
  * @swagger
@@ -126,6 +127,6 @@ router.patch('/:id', requireAuth, MessageController.updateMessage);
  *       204:
  *         description: Message deleted
  */
-router.delete('/:id', requireAuth, MessageController.deleteMessage);
+router.delete('/:id', requireAuth, auditAction('MESSAGES', 'Usunięto wiadomość'), MessageController.deleteMessage);
 
 export default router;

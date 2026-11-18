@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import logo from "../../../assets/zut_fav.png";
+import { WorkspaceLayout } from "../../layout/WorkspaceLayout";
 import {
   canOpenLecturerPlan,
   fetchSession,
@@ -11,8 +11,7 @@ import "./AdminRegistry.css";
 import { useAdminScrollRoot } from "./useAdminScrollRoot";
 import { useTheme } from "../../../context/ThemeContext";
 import AdminPairingScanner from "./adminPanel/AdminPairingScanner";
-import AdminPanelSidebar from "./adminPanel/AdminPanelSidebar";
-import AdminPanelThemeToggle from "./adminPanel/AdminPanelThemeToggle";
+import type { AdminNavigationKey } from "./adminPanel/AdminPanelSidebar";
 import AdminsView from "./adminPanel/AdminsView";
 import DeviceDrawer from "./adminPanel/DeviceDrawer";
 import DevicesView from "./adminPanel/DevicesView";
@@ -53,18 +52,8 @@ import type {
   } from "./adminPanel/types";
 
 const TOAST_DURATION_MS = 5000;
-const MOBILE_BREAKPOINT_PX = 720;
 const SCROLL_TOP_VISIBILITY_THRESHOLD_PX = 160;
 const SCROLL_TOP_TOAST_GAP_PX = 12;
-
-type AdminNavigationKey = AdminPanelView | "pairing" | "lecturer-preview";
-
-interface NavigationItem {
-  key: AdminNavigationKey;
-  label: string;
-  icon: string;
-  active: boolean;
-}
 
 interface AdminToast {
   id: number;
@@ -78,17 +67,6 @@ interface PreviewModalState {
   message: string | null;
   requestedAt: number | null;
 }
-
-const ADMIN_NAVIGATION_ORDER: AdminNavigationKey[] = [
-  "devices",
-  "pending-tablets",
-  "admins",
-  "schedule",
-  "pairing",
-  "lecturer-preview",
-  "tablet-preview",
-  "priority-gallery",
-];
 
 const PAIRING_MESSAGE = {
   staleDevice: "Tablet już sparowany.",
@@ -147,7 +125,7 @@ const AdminRegistry = () => {
   const currentView = getActiveView(searchParams.get("view"));
   const previewDeviceId = getPreviewDeviceId(searchParams.get("deviceId"));
 
-  const { theme: adminTheme, setTheme: setAdminTheme } = useTheme();
+  const { theme: adminTheme } = useTheme();
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(false);
@@ -232,10 +210,9 @@ const AdminRegistry = () => {
   const [pairingRoomTone, setPairingRoomTone] = useState<Tone>("neutral");
   const [toasts, setToasts] = useState<AdminToast[]>([]);
   const [isPairingScannerOpen, setPairingScannerOpen] = useState(false);
+  const pairingLookupAbortRef = useRef<AbortController | null>(null);
   const [pairingReturnMode, setPairingReturnMode] =
     useState<"none" | "after-save">("none");
-  const [isMobileNavOpen, setMobileNavOpen] = useState(false);
-  const [isMobileSettingsOpen, setMobileSettingsOpen] = useState(false);
   const [isScrollTopVisible, setScrollTopVisible] = useState(false);
   const [toastStackOffset, setToastStackOffset] = useState(0);
 
@@ -310,7 +287,6 @@ const AdminRegistry = () => {
   const offlineDevicesCount = pairedDevices.filter(
     (device) => device.connectionStatus === "OFFLINE",
   ).length;
-  const lecturerPanelHref = canOpenLecturerPlan(session) ? "/lecturerPlan" : null;
 
 
 
@@ -324,6 +300,8 @@ const AdminRegistry = () => {
 
   useAdminScrollRoot();
 
+  useEffect(() => () => pairingLookupAbortRef.current?.abort(), []);
+
   useEffect(() => {
     if (drawerDeviceId !== null && !drawerDevice) {
       setDrawerDeviceId(null);
@@ -335,34 +313,6 @@ const AdminRegistry = () => {
       setPreviewState(null);
     }
   }, [previewDevice, previewState]);
-
-  useEffect(() => {
-    if (!isMobileNavOpen && !isMobileSettingsOpen) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMobileNavOpen(false);
-        setMobileSettingsOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isMobileNavOpen, isMobileSettingsOpen]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth > MOBILE_BREAKPOINT_PX) {
-        setMobileNavOpen(false);
-        setMobileSettingsOpen(false);
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   useEffect(() => {
     const query = sanitizeRoomValue(formClassroom);
@@ -534,7 +484,7 @@ const AdminRegistry = () => {
     pushToast(PAIRING_MESSAGE.staleDevice, "warning");
   }, [pairingDevice, pairingDeviceId, pushToast]);
 
-  const resetRoomSearch = () => {
+  const resetRoomSearch = useCallback(() => {
     roomSearchAbortRef.current?.abort();
     roomSearchAbortRef.current = null;
     roomSearchRequestIdRef.current += 1;
@@ -543,7 +493,7 @@ const AdminRegistry = () => {
     setIsSearching(false);
     setSelectedSuggestion(null);
     setRoomError("");
-  };
+  }, []);
 
   const resetPairingRoomSearch = () => {
     pairingRoomSearchAbortRef.current?.abort();
@@ -567,11 +517,11 @@ const AdminRegistry = () => {
     }
   };
 
-  const closeDrawer = () => {
+  const closeDrawer = useCallback(() => {
     resetRoomSearch();
     setDrawerDeviceId(null);
     setFormClassroom("");
-  };
+  }, [resetRoomSearch]);
 
   const handleDrawerClose = () => {
     setPairingReturnMode("none");
@@ -594,24 +544,8 @@ const AdminRegistry = () => {
   );
 
   const openTabletPreviewView = (deviceId?: number | null) => {
-    closeMobilePanels();
     closeDrawer();
     setTabletPreviewSearchParams(deviceId);
-  };
-
-  const closeMobilePanels = () => {
-    setMobileNavOpen(false);
-    setMobileSettingsOpen(false);
-  };
-
-  const toggleMobileNav = () => {
-    setMobileSettingsOpen(false);
-    setMobileNavOpen((current) => !current);
-  };
-
-  const toggleMobileSettings = () => {
-    setMobileNavOpen(false);
-    setMobileSettingsOpen((current) => !current);
   };
 
   const fetchRoomMatches = async (query: string, signal?: AbortSignal) => {
@@ -1876,7 +1810,6 @@ const AdminRegistry = () => {
 
   const handleLogout = async () => {
     try {
-      closeMobilePanels();
       await logout();
       navigate("/");
     } catch (error) {
@@ -1983,12 +1916,11 @@ const AdminRegistry = () => {
     setSelectedSuggestion(currentRoom || null);
   };
 
-  const openPairingScanner = () => {
-    closeMobilePanels();
+  const openPairingScanner = useCallback(() => {
     closeDrawer();
     setPairingReturnMode("none");
     setPairingScannerOpen(true);
-  };
+  }, [closeDrawer]);
 
   const handlePreviewRetry = () => {
     if (!previewDevice) {
@@ -2038,7 +1970,7 @@ const AdminRegistry = () => {
     return { ok: true as const };
   };
 
-  const lookupPendingDeviceByCode = async (rawDeviceId: string) => {
+  const lookupPendingDeviceByCode = async (rawDeviceId: string, signal?: AbortSignal) => {
     const normalizedDeviceId = sanitizePairingDeviceId(rawDeviceId);
 
     if (!/^\d{6}$/.test(normalizedDeviceId)) {
@@ -2051,8 +1983,10 @@ const AdminRegistry = () => {
     try {
       const response = await fetch(
         `/api/devices/pending/by-code?deviceId=${encodeURIComponent(normalizedDeviceId)}`,
+        { signal },
       );
       const data = await response.json().catch(() => ({}));
+      if (signal?.aborted) return { ok: false as const, message: "" };
 
       if (!response.ok) {
         return {
@@ -2078,6 +2012,7 @@ const AdminRegistry = () => {
 
       return { ok: true as const, device };
     } catch (error) {
+      if (signal?.aborted) return { ok: false as const, message: "" };
       console.error("Error looking up pending device:", error);
       return {
         ok: false as const,
@@ -2124,7 +2059,12 @@ const AdminRegistry = () => {
   };
 
   const handlePairingLookup = async (deviceId: string) => {
-    const result = await lookupPendingDeviceByCode(deviceId);
+    pairingLookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    pairingLookupAbortRef.current = controller;
+    const result = await lookupPendingDeviceByCode(deviceId, controller.signal);
+    if (controller.signal.aborted) return { ok: false as const };
+    pairingLookupAbortRef.current = null;
     if (!result.ok) {
       return result;
     }
@@ -2432,7 +2372,6 @@ const AdminRegistry = () => {
   };
 
   const handleViewChange = (view: AdminPanelView) => {
-    closeMobilePanels();
     closeDrawer();
     setPairingReturnMode("none");
     setPairingScannerOpen(false);
@@ -2460,43 +2399,19 @@ const AdminRegistry = () => {
     setSearchParams({ view });
   };
 
-  const navigationItems: NavigationItem[] = ADMIN_NAVIGATION_ORDER.map((key) => {
-    if (key === "pairing") {
-      return {
-        key,
-        label: "Tryb parowania",
-        icon: "fas fa-camera",
-        active: false,
-      };
-    }
-
-    if (key === "lecturer-preview") {
-      return {
-        key,
-        label: "Podgląd dydaktyka",
-        icon: "fas fa-user-tie",
-        active: false,
-      };
-    }
-
-    return {
-      key,
-      label: adminViewMeta[key].label,
-      icon: adminViewMeta[key].icon,
-      active: currentView === key,
-    };
-  });
+  useEffect(() => {
+    if (searchParams.get("pair") !== "1") return;
+    openPairingScanner();
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("pair");
+      return next;
+    }, { replace: true });
+  }, [openPairingScanner, searchParams, setSearchParams]);
 
   const handleNavigationSelect = (key: AdminNavigationKey) => {
-    closeMobilePanels();
-
     if (key === "pairing") {
       openPairingScanner();
-      return;
-    }
-
-    if (key === "lecturer-preview") {
-      navigate("/lecturerPlan?mode=admin-preview");
       return;
     }
 
@@ -2568,364 +2483,219 @@ const AdminRegistry = () => {
   };
 
   return (
-    <div className="admin-console" data-admin-theme={adminTheme}>
-      <header className="admin-console__appbar">
-        <button
-          type="button"
-          className="admin-icon-button admin-console__mobile-trigger"
-          onClick={toggleMobileNav}
-          aria-label="Otwórz sekcje panelu"
-          aria-expanded={isMobileNavOpen}
-        >
-          <i className="fas fa-bars" aria-hidden="true" />
-        </button>
+    <WorkspaceLayout
+      title="Administracja"
+      login={session?.login}
+      onLogout={handleLogout}
+      navigation={{ ownPlan: canOpenLecturerPlan(session), currentView, onSelect: handleNavigationSelect }}
+    >
+      <main
+        className={[
+          "admin-console__main",
+          currentView === "devices" ? "admin-console__main--devices" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <h1 className="admin-workspace-title">{adminViewMeta[currentView].title}</h1>
+        {currentView === "devices" ? (
+          <DevicesView
+            adminTheme={adminTheme}
+            activeDevices={activeDevices}
+            pendingDevices={allPendingDevices}
+            counts={{
+              all: devices.length,
+              online: onlineDevicesCount,
+              offline: offlineDevicesCount,
+              pending: allPendingDevices.length,
+            }}
+            loading={loading}
+            manualRefreshing={manualRefreshing}
+            reloadingTablets={reloadingTablets}
+            batchUpdating={batchMutationLoading}
+            batchThemeUpdating={batchThemeLoading}
+            batchBlackScreenUpdating={batchBlackScreenLoading}
+            batchPriorityMessageUpdating={batchPriorityMessageLoading}
+            batchPriorityMessageClearing={batchPriorityMessageClearLoading}
+            priorityMessagesLoading={priorityMessagesLoading}
+            themeMutationDeviceId={themeMutationDeviceId}
+            blackScreenMutationDeviceId={blackScreenMutationDeviceId}
+            batchThemeValue={batchThemeValue}
+            batchBlackScreenValue={batchBlackScreenValue}
+            batchPriorityMessageTemplateId={batchPriorityMessageTemplateId}
+            priorityMessageTemplates={priorityMessageTemplates}
+            selectedDeviceIds={selectedDeviceIds}
+            visibleDeviceIds={visibleDeviceIds}
+            searchTerm={searchTerm}
+            sortState={deviceSort}
+            pairingCode={pairingCode}
+            pairingSuggestions={pairingSuggestions}
+            pairingDevice={pairingDevice}
+            pairingRoom={pairingRoom}
+            pairingRoomSuggestions={pairingRoomSuggestions}
+            pairingShowRoomSuggestions={pairingShowRoomSuggestions}
+            pairingLookingUp={pairingLookingUp}
+            pairingAssigning={pairingAssigning}
+            pairingSearchingRooms={pairingSearchingRooms}
+            pairingCodeTone={pairingCodeTone}
+            pairingRoomTone={pairingRoomTone}
+            onSearchTermChange={setSearchTerm}
+            onVisibleDeviceIdsChange={setVisibleDeviceIds}
+            onSortColumn={(column) => {
+              setDeviceSort((currentSort) => getNextDeviceSortState(currentSort, column));
+            }}
+            onDeleteSelectedDevices={() => void handleDeleteSelectedDevices()}
+            onBatchThemeValueChange={setBatchThemeValue}
+            onBatchBlackScreenValueChange={setBatchBlackScreenValue}
+            onBatchPriorityMessageTemplateChange={setBatchPriorityMessageTemplateId}
+            onApplyBatchTheme={() => void handleBatchThemeUpdate()}
+            onApplyBatchBlackScreen={() => void handleBatchBlackScreenUpdate()}
+            onApplyBatchPriorityMessage={() => void handleBatchPriorityMessageActivate()}
+            onClearBatchPriorityMessage={() => void handleBatchPriorityMessageClear()}
+            onToggleAllActiveDevices={handleToggleAllActiveDevices}
+            onToggleDeviceSelection={handleToggleDeviceSelection}
+            onRefresh={() => void fetchDevices({ manual: true })}
+            onReloadTablets={handleReloadAllTablets}
+            onEditDevice={openDeviceEditor}
+            onPreviewDevice={(device) => {
+              openTabletPreviewView(device.id);
+            }}
+            onDeviceThemeChange={(device, theme) => {
+              void handleDeviceThemeChange(device, theme);
+            }}
+            onDeviceBlackScreenModeChange={(device, blackScreenMode) => {
+              void handleDeviceBlackScreenModeChange(device, blackScreenMode);
+            }}
+            onDeleteDevice={handleDeleteDevice}
+            onPairingCodeChange={handlePairingCodeChange}
+            onPairingSuggestionSelect={handlePairingSuggestionSelect}
+            onLookupPairingDevice={() => {
+              void handleLookupPendingPairingDevice();
+            }}
+            onResetPairing={handleResetPairing}
+            onPairingRoomChange={handlePairingRoomChange}
+            onPairingRoomSuggestionSelect={(room) => {
+              setPairingRoom(room);
+              setPairingSelectedSuggestion(room);
+              setPairingRoomTone("success");
+              setPairingShowRoomSuggestions(false);
+              setPairingRoomSuggestions([]);
+            }}
+            onAssignPairingDevice={() => {
+              void handleAssignPendingDevice();
+            }}
+          />
+        ) : null}
 
-        <div className="admin-console__brand">
-          <img className="admin-console__brand-logo" src={logo} alt="ZUT" />
-          <div className="admin-console__brand-copy">
-            <strong>PlanQR Admin</strong>
-            {session?.login ? (
-              <span className="admin-console__brand-user">Zalogowany: {session.login}</span>
-            ) : null}
-          </div>
-        </div>
+        {currentView === "pending-tablets" ? (
+          <PendingTabletsView
+            devices={allPendingDevices}
+            loading={loading}
+            manualRefreshing={manualRefreshing}
+            banningDeviceId={banIpDeviceId}
+            searchTerm={pendingSearchTerm}
+            onSearchTermChange={setPendingSearchTerm}
+            onRefresh={() => void fetchDevices({ manual: true })}
+            onPairDevice={(device) => {
+              closeDrawer();
+              openDeviceEditor(device);
+            }}
+            onDeleteDevice={handleDeleteDevice}
+            onBanDeviceIp={(device) => {
+              void handleBanDeviceIp(device);
+            }}
+          />
+        ) : null}
 
-        <strong className="admin-console__mobile-title">PlanQR Admin</strong>
-
-        <div className="admin-console__appbar-actions">
-          <AdminPanelThemeToggle theme={adminTheme} onChange={setAdminTheme} />
-          <a className="admin-button admin-button--ghost admin-button--small" href="/adminpanel/kantech">
-            Kantech na żywo
-          </a>
-          {lecturerPanelHref ? (
-            <a
-              className="admin-button admin-button--ghost admin-button--small"
-              href={lecturerPanelHref}
-            >
-              Panel Dydaktyka
-            </a>
-          ) : null}
-          <button
-            type="button"
-            className="admin-button admin-button--ghost admin-button--small"
-            onClick={handleLogout}
-          >
-            Wyloguj
-          </button>
-        </div>
-
-        <button
-          type="button"
-          className="admin-icon-button admin-console__mobile-trigger"
-          onClick={toggleMobileSettings}
-          aria-label="Otwórz ustawienia panelu"
-          aria-expanded={isMobileSettingsOpen}
-        >
-          <i className="fas fa-cog" aria-hidden="true" />
-        </button>
-      </header>
-
-      <div className="admin-console__body">
-        <AdminPanelSidebar
-          className="admin-nav--desktop"
-          navigationItems={navigationItems}
-          onItemSelect={handleNavigationSelect}
-        />
-
-        <main
-          className={[
-            "admin-console__main",
-            currentView === "devices" ? "admin-console__main--devices" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        >
-          {currentView === "devices" ? (
-            <DevicesView
-              adminTheme={adminTheme}
-              activeDevices={activeDevices}
-              pendingDevices={allPendingDevices}
-              counts={{
-                all: devices.length,
-                online: onlineDevicesCount,
-                offline: offlineDevicesCount,
-                pending: allPendingDevices.length,
-              }}
-              loading={loading}
-              manualRefreshing={manualRefreshing}
-              reloadingTablets={reloadingTablets}
-              batchUpdating={batchMutationLoading}
-              batchThemeUpdating={batchThemeLoading}
-              batchBlackScreenUpdating={batchBlackScreenLoading}
-              batchPriorityMessageUpdating={batchPriorityMessageLoading}
-              batchPriorityMessageClearing={batchPriorityMessageClearLoading}
-              priorityMessagesLoading={priorityMessagesLoading}
-              themeMutationDeviceId={themeMutationDeviceId}
-              blackScreenMutationDeviceId={blackScreenMutationDeviceId}
-              batchThemeValue={batchThemeValue}
-              batchBlackScreenValue={batchBlackScreenValue}
-              batchPriorityMessageTemplateId={batchPriorityMessageTemplateId}
-              priorityMessageTemplates={priorityMessageTemplates}
-              selectedDeviceIds={selectedDeviceIds}
-              visibleDeviceIds={visibleDeviceIds}
-              searchTerm={searchTerm}
-              sortState={deviceSort}
-              pairingCode={pairingCode}
-              pairingSuggestions={pairingSuggestions}
-              pairingDevice={pairingDevice}
-              pairingRoom={pairingRoom}
-              pairingRoomSuggestions={pairingRoomSuggestions}
-              pairingShowRoomSuggestions={pairingShowRoomSuggestions}
-              pairingLookingUp={pairingLookingUp}
-              pairingAssigning={pairingAssigning}
-              pairingSearchingRooms={pairingSearchingRooms}
-              pairingCodeTone={pairingCodeTone}
-              pairingRoomTone={pairingRoomTone}
-              onSearchTermChange={setSearchTerm}
-              onVisibleDeviceIdsChange={setVisibleDeviceIds}
-              onSortColumn={(column) => {
-                setDeviceSort((currentSort) => getNextDeviceSortState(currentSort, column));
-              }}
-              onDeleteSelectedDevices={() => void handleDeleteSelectedDevices()}
-              onBatchThemeValueChange={setBatchThemeValue}
-              onBatchBlackScreenValueChange={setBatchBlackScreenValue}
-              onBatchPriorityMessageTemplateChange={setBatchPriorityMessageTemplateId}
-              onApplyBatchTheme={() => void handleBatchThemeUpdate()}
-              onApplyBatchBlackScreen={() => void handleBatchBlackScreenUpdate()}
-              onApplyBatchPriorityMessage={() => void handleBatchPriorityMessageActivate()}
-              onClearBatchPriorityMessage={() => void handleBatchPriorityMessageClear()}
-              onToggleAllActiveDevices={handleToggleAllActiveDevices}
-              onToggleDeviceSelection={handleToggleDeviceSelection}
-              onRefresh={() => void fetchDevices({ manual: true })}
-              onReloadTablets={handleReloadAllTablets}
-              onEditDevice={openDeviceEditor}
-              onPreviewDevice={(device) => {
-                openTabletPreviewView(device.id);
-              }}
-              onDeviceThemeChange={(device, theme) => {
-                void handleDeviceThemeChange(device, theme);
-              }}
-              onDeviceBlackScreenModeChange={(device, blackScreenMode) => {
-                void handleDeviceBlackScreenModeChange(device, blackScreenMode);
-              }}
-              onDeleteDevice={handleDeleteDevice}
-              onPairingCodeChange={handlePairingCodeChange}
-              onPairingSuggestionSelect={handlePairingSuggestionSelect}
-              onLookupPairingDevice={() => {
-                void handleLookupPendingPairingDevice();
-              }}
-              onResetPairing={handleResetPairing}
-              onPairingRoomChange={handlePairingRoomChange}
-              onPairingRoomSuggestionSelect={(room) => {
-                setPairingRoom(room);
-                setPairingSelectedSuggestion(room);
-                setPairingRoomTone("success");
-                setPairingShowRoomSuggestions(false);
-                setPairingRoomSuggestions([]);
-              }}
-              onAssignPairingDevice={() => {
-                void handleAssignPendingDevice();
-              }}
-            />
-          ) : null}
-
-          {currentView === "pending-tablets" ? (
-            <PendingTabletsView
-              devices={allPendingDevices}
-              loading={loading}
-              manualRefreshing={manualRefreshing}
-              banningDeviceId={banIpDeviceId}
-              searchTerm={pendingSearchTerm}
-              onSearchTermChange={setPendingSearchTerm}
-              onRefresh={() => void fetchDevices({ manual: true })}
-              onPairDevice={(device) => {
-                closeDrawer();
-                openDeviceEditor(device);
-              }}
-              onDeleteDevice={handleDeleteDevice}
-              onBanDeviceIp={(device) => {
-                void handleBanDeviceIp(device);
-              }}
-            />
-          ) : null}
-
-          {currentView === "tablet-preview" ? (
-            <TabletPreviewView
-              activeDevices={pairedDevices}
-              device={previewDevice}
-              state={
-                previewState && previewDeviceId !== null && previewState.deviceId === previewDeviceId
-                  ? {
-                      phase: previewState.phase,
-                      message: previewState.message,
-                    }
-                  : null
+        {currentView === "tablet-preview" ? (
+          <TabletPreviewView
+            activeDevices={pairedDevices}
+            device={previewDevice}
+            state={
+              previewState && previewDeviceId !== null && previewState.deviceId === previewDeviceId
+                ? {
+                    phase: previewState.phase,
+                    message: previewState.message,
+                  }
+                : null
+            }
+            onSelectDevice={(deviceId) => {
+              const nextDevice = pairedDevices.find((device) => device.id === deviceId);
+              if (nextDevice) {
+                openTabletPreviewView(nextDevice.id);
               }
-              onSelectDevice={(deviceId) => {
-                const nextDevice = pairedDevices.find((device) => device.id === deviceId);
-                if (nextDevice) {
-                  openTabletPreviewView(nextDevice.id);
-                }
-              }}
-              onRetryProfile={handlePreviewRetry}
-              onEditDevice={openDeviceEditor}
-              onDeleteDevice={handleDeleteDevice}
-              onUpdateDeviceDisplaySettings={handleDeviceDisplaySettingsUpdate}
-              onToast={pushToast}
-            />
-          ) : null}
+            }}
+            onRetryProfile={handlePreviewRetry}
+            onEditDevice={openDeviceEditor}
+            onDeleteDevice={handleDeleteDevice}
+            onUpdateDeviceDisplaySettings={handleDeviceDisplaySettingsUpdate}
+            onToast={pushToast}
+          />
+        ) : null}
 
-          {currentView === "admins" ? (
-            <AdminsView
-              admins={admins}
-              adminsLoading={adminsLoading}
-              adminMutationLoading={adminMutationLoading}
-              newAdminUsername={newAdminUsername}
-              adminFeedback={adminFeedback}
-              adminFeedbackTone={adminFeedbackTone}
-              onUsernameChange={(value) => {
-                setNewAdminUsername(value);
-                setAdminFeedback(null);
-              }}
-              onAddAdmin={handleAddAdmin}
-              onRefreshAdmins={fetchAdmins}
-              onRemoveAdmin={handleRemoveAdmin}
-            />
-          ) : null}
+        {currentView === "admins" ? (
+          <AdminsView
+            admins={admins}
+            adminsLoading={adminsLoading}
+            adminMutationLoading={adminMutationLoading}
+            newAdminUsername={newAdminUsername}
+            adminFeedback={adminFeedback}
+            adminFeedbackTone={adminFeedbackTone}
+            onUsernameChange={(value) => {
+              setNewAdminUsername(value);
+              setAdminFeedback(null);
+            }}
+            onAddAdmin={handleAddAdmin}
+            onRefreshAdmins={fetchAdmins}
+            onRemoveAdmin={handleRemoveAdmin}
+          />
+        ) : null}
 
-          {currentView === "schedule" ? (
-            <ScheduleView
-              settings={nightModeSettings}
-              loading={nightModeLoading}
-              saving={nightModeSaving}
-              feedback={nightModeFeedback}
-              feedbackTone={nightModeFeedbackTone}
-              onRefresh={fetchNightModeSettings}
-              onSettingChange={(next) => {
-                setNightModeSettings(next);
-                setNightModeFeedback(null);
-              }}
-              onSave={handleNightModeSettingsSave}
-            />
-          ) : null}
+        {currentView === "schedule" ? (
+          <ScheduleView
+            settings={nightModeSettings}
+            loading={nightModeLoading}
+            saving={nightModeSaving}
+            feedback={nightModeFeedback}
+            feedbackTone={nightModeFeedbackTone}
+            onRefresh={fetchNightModeSettings}
+            onSettingChange={(next) => {
+              setNightModeSettings(next);
+              setNightModeFeedback(null);
+            }}
+            onSave={handleNightModeSettingsSave}
+          />
+        ) : null}
 
-          {currentView === "priority-gallery" ? (
-            <PriorityMessagesView
-              adminTheme={adminTheme}
-              templates={priorityMessageTemplates}
-              devices={pairedDevices}
-              schedules={priorityMessageSchedules}
-              presets={priorityMessagePresets}
-              templatesLoading={priorityMessagesLoading}
-              schedulesLoading={priorityMessageSchedulesLoading}
-              presetsLoading={priorityMessagePresetsLoading}
-              scheduleMutationId={priorityMessageScheduleMutationId}
-              presetMutationId={priorityMessagePresetMutationId}
-              creatingSchedule={priorityMessageScheduleSaving}
-              creatingTemplate={priorityMessageCreating}
-              uploadingTemplate={priorityMessageUploading}
-              mutatingTemplateId={priorityMessageMutatingTemplateId}
-              onRefreshTemplates={() => void fetchPriorityMessageTemplates()}
-              onRefreshSchedules={() => void fetchPriorityMessageSchedules()}
-              onRefreshPresets={() => void fetchPriorityMessagePresets()}
-              onSaveSchedule={handlePriorityMessageScheduleSave}
-              onDeleteSchedule={handlePriorityMessageScheduleDelete}
-              onSavePreset={handlePriorityMessagePresetSave}
-              onDeletePreset={handlePriorityMessagePresetDelete}
-              onCreateTemplate={handlePriorityMessageTemplateCreate}
-              onUpdateTemplate={handlePriorityMessageTemplateUpdate}
-              onDeleteTemplate={handlePriorityMessageTemplateDelete}
-            />
-          ) : null}
-        </main>
-      </div>
-
-      {isMobileNavOpen ? (
-        <div
-          className="admin-mobile-panel__overlay admin-mobile-panel__overlay--nav"
-          onClick={closeMobilePanels}
-        >
-          <aside
-            className="admin-mobile-panel admin-mobile-panel--nav"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="admin-mobile-panel__header">
-              <h2 className="admin-mobile-panel__title">Sekcje</h2>
-              <button
-                type="button"
-                className="admin-icon-button"
-                onClick={closeMobilePanels}
-                aria-label="Zamknij sekcje"
-              >
-                <i className="fas fa-times" aria-hidden="true" />
-              </button>
-            </header>
-            <div className="admin-mobile-panel__body">
-              <AdminPanelSidebar
-                className="admin-nav--mobile"
-                navigationItems={navigationItems}
-                onItemSelect={handleNavigationSelect}
-              />
-            </div>
-          </aside>
-        </div>
-      ) : null}
-
-      {isMobileSettingsOpen ? (
-        <div
-          className="admin-mobile-panel__overlay admin-mobile-panel__overlay--settings"
-          onClick={closeMobilePanels}
-        >
-          <aside
-            className="admin-mobile-panel admin-mobile-panel--settings"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="admin-mobile-panel__header">
-              <h2 className="admin-mobile-panel__title">Ustawienia</h2>
-              <button
-                type="button"
-                className="admin-icon-button"
-                onClick={closeMobilePanels}
-                aria-label="Zamknij ustawienia"
-              >
-                <i className="fas fa-times" aria-hidden="true" />
-              </button>
-            </header>
-            <div className="admin-mobile-panel__body">
-              {session?.login ? (
-                <div className="admin-mobile-panel__user">
-                  <span>Zalogowany</span>
-                  <strong>{session.login}</strong>
-                </div>
-              ) : null}
-
-              <AdminPanelThemeToggle theme={adminTheme} onChange={setAdminTheme} />
-
-              <div className="admin-mobile-panel__actions">
-                <a className="admin-button admin-button--ghost" href="/adminpanel/kantech" onClick={closeMobilePanels}>
-                  Kantech na żywo
-                </a>
-                {lecturerPanelHref ? (
-                  <a
-                    className="admin-button admin-button--ghost"
-                    href={lecturerPanelHref}
-                    onClick={closeMobilePanels}
-                  >
-                    Panel Dydaktyka
-                  </a>
-                ) : null}
-                <button
-                  type="button"
-                  className="admin-button admin-button--ghost"
-                  onClick={handleLogout}
-                >
-                  Wyloguj
-                </button>
-              </div>
-            </div>
-          </aside>
-        </div>
-      ) : null}
+        {currentView === "priority-gallery" ? (
+          <PriorityMessagesView
+            adminTheme={adminTheme}
+            templates={priorityMessageTemplates}
+            devices={pairedDevices}
+            schedules={priorityMessageSchedules}
+            presets={priorityMessagePresets}
+            templatesLoading={priorityMessagesLoading}
+            schedulesLoading={priorityMessageSchedulesLoading}
+            presetsLoading={priorityMessagePresetsLoading}
+            scheduleMutationId={priorityMessageScheduleMutationId}
+            presetMutationId={priorityMessagePresetMutationId}
+            creatingSchedule={priorityMessageScheduleSaving}
+            creatingTemplate={priorityMessageCreating}
+            uploadingTemplate={priorityMessageUploading}
+            mutatingTemplateId={priorityMessageMutatingTemplateId}
+            onRefreshTemplates={() => void fetchPriorityMessageTemplates()}
+            onRefreshSchedules={() => void fetchPriorityMessageSchedules()}
+            onRefreshPresets={() => void fetchPriorityMessagePresets()}
+            onSaveSchedule={handlePriorityMessageScheduleSave}
+            onDeleteSchedule={handlePriorityMessageScheduleDelete}
+            onSavePreset={handlePriorityMessagePresetSave}
+            onDeletePreset={handlePriorityMessagePresetDelete}
+            onCreateTemplate={handlePriorityMessageTemplateCreate}
+            onUpdateTemplate={handlePriorityMessageTemplateUpdate}
+            onDeleteTemplate={handlePriorityMessageTemplateDelete}
+          />
+        ) : null}
+      </main>
 
       {drawerDevice ? (
         <DeviceDrawer
@@ -2957,6 +2727,8 @@ const AdminRegistry = () => {
       {isPairingScannerOpen ? (
         <AdminPairingScanner
           onClose={() => {
+            pairingLookupAbortRef.current?.abort();
+            pairingLookupAbortRef.current = null;
             setPairingReturnMode("none");
             setPairingScannerOpen(false);
           }}
@@ -2998,7 +2770,7 @@ const AdminRegistry = () => {
           ))}
         </div>
       ) : null}
-    </div>
+    </WorkspaceLayout>
   );
 };
 

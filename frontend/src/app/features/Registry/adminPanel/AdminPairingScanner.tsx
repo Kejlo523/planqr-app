@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { FaTimes } from "react-icons/fa";
 import QrScanner from "qr-scanner";
 import {
   extractPairingDeviceId,
@@ -46,6 +47,7 @@ const AdminPairingScanner = ({
   onPair,
 }: AdminPairingScannerProps) => {
   const inputId = useId();
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scannerRef = useRef<QrScanner | null>(null);
   const onPairRef = useRef(onPair);
@@ -53,11 +55,11 @@ const AdminPairingScanner = ({
   const busyRef = useRef(false);
   const resumeTimeoutRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
-  const modeEffectReadyRef = useRef(false);
 
   const [mode, setMode] = useState<PairingMode>("scan");
   const [manualCode, setManualCode] = useState("");
-  const [isStarting, setIsStarting] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
+  const [cameraRequested, setCameraRequested] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -88,25 +90,21 @@ const AdminPairingScanner = ({
   };
 
   const startScanner = async () => {
-    if (!scannerRef.current) {
-      return;
-    }
+    const scanner = scannerRef.current;
+    if (!scanner) return;
 
     try {
-      setIsStarting(true);
-      await scannerRef.current.start();
-
-      if (!mountedRef.current) {
-        return;
-      }
-
+      setCameraRequested(true);
       setCameraError(null);
+      setIsStarting(true);
+      await scanner.start();
+
+      if (!mountedRef.current || scanner !== scannerRef.current || modeRef.current !== "scan") return;
+
       setIsStarting(false);
       setStatusMessage(null);
     } catch (error) {
-      if (!mountedRef.current) {
-        return;
-      }
+      if (!mountedRef.current || scanner !== scannerRef.current || modeRef.current !== "scan") return;
 
       setIsStarting(false);
       setStatusMessage(null);
@@ -145,6 +143,7 @@ const AdminPairingScanner = ({
     setFeedback(null);
     setStatusMessage(`Szukam tabletu ${formatPairingDeviceId(deviceId)}...`);
     await pauseScanner();
+    if (!mountedRef.current) return;
 
     const result = await onPairRef.current(deviceId);
 
@@ -172,10 +171,13 @@ const AdminPairingScanner = ({
   };
 
   useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
     mountedRef.current = true;
 
     return () => {
       mountedRef.current = false;
+      dialog?.close();
     };
   }, []);
 
@@ -208,7 +210,6 @@ const AdminPairingScanner = ({
     );
 
     scannerRef.current = scanner;
-    void startScanner();
 
     return () => {
       clearResumeTimeout();
@@ -219,34 +220,12 @@ const AdminPairingScanner = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!modeEffectReadyRef.current) {
-      modeEffectReadyRef.current = true;
-      return;
-    }
-
-    if (!scannerRef.current) {
-      return;
-    }
-
-    if (mode === "manual") {
-      void pauseScanner();
-      return;
-    }
-
-    if (!isProcessing) {
-      void startScanner();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
-
   return (
-    <div className="admin-pairing-scanner__overlay" onClick={onClose}>
-      <div
+      <dialog
+        ref={dialogRef}
         className="admin-pairing-scanner"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
+        onClick={(event) => { if (event.currentTarget === event.target) onClose(); }}
+        onCancel={(event) => { event.preventDefault(); onClose(); }}
         aria-labelledby="admin-pairing-scanner-title"
       >
         <header className="admin-pairing-scanner__header">
@@ -257,16 +236,16 @@ const AdminPairingScanner = ({
           </div>
           <button
             type="button"
-            className="admin-icon-button"
+            className="admin-button admin-button--ghost admin-button--small"
             onClick={onClose}
             aria-label="Wyjdź z trybu parowania"
           >
-            <i className="fas fa-times" aria-hidden="true" />
+            <FaTimes aria-hidden="true" /> Zamknij
           </button>
         </header>
 
         <div className="admin-pairing-scanner__body">
-          <div className="admin-pairing-scanner__camera">
+          <div className="admin-pairing-scanner__camera" hidden={mode === "manual"}>
             <video
               ref={videoRef}
               className="admin-pairing-scanner__video"
@@ -282,10 +261,12 @@ const AdminPairingScanner = ({
               </div>
             ) : null}
 
-            {cameraError && mode === "scan" ? (
-              <div className="admin-pairing-scanner__camera-state admin-pairing-scanner__camera-state--error">
-                <i className="fas fa-camera-slash" aria-hidden="true" />
-                <p>{cameraError}</p>
+            {(!cameraRequested || cameraError) && !isStarting && mode === "scan" ? (
+              <div className="admin-pairing-scanner__camera-state">
+                {cameraError && <p role="status">{cameraError}</p>}
+                <button type="button" className="admin-button admin-button--primary" onClick={() => void startScanner()}>
+                  {cameraError ? "Spróbuj ponownie" : "Włącz aparat"}
+                </button>
               </div>
             ) : null}
           </div>
@@ -349,6 +330,10 @@ const AdminPairingScanner = ({
             onClick={() => {
               setFeedback(null);
               setStatusMessage(null);
+              setIsStarting(false);
+              setCameraRequested(false);
+              setCameraError(null);
+              void pauseScanner();
               setMode((current) => (current === "scan" ? "manual" : "scan"));
             }}
             disabled={isProcessing}
@@ -356,8 +341,7 @@ const AdminPairingScanner = ({
             {mode === "scan" ? "Kod" : "Aparat"}
           </button>
         </footer>
-      </div>
-    </div>
+      </dialog>
   );
 };
 

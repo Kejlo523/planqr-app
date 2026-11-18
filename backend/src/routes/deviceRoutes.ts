@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { auditAction } from '../middlewares/auditMiddleware';
 import { DeviceListController } from '../controllers/DeviceListController';
 import { requireAdmin } from '../middlewares/authMiddleware';
 
@@ -39,28 +40,30 @@ router.use(requireAdmin);
 router.get('/validate', DeviceListController.validateRoomAndSecretUrl);
 router.get('/pending/by-code', DeviceListController.getPendingDeviceByCode);
 router.get('/display-settings', DeviceListController.getDisplaySettings);
-router.put('/display-settings', DeviceListController.updateDisplaySettings);
+router.put('/display-settings', auditAction('TABLETS', 'Zapisano ustawienia ekranów'), DeviceListController.updateDisplaySettings);
 router.get('/priority-messages', DeviceListController.getPriorityMessages);
 router.post('/priority-messages/upload', DeviceListController.uploadPriorityMessageMedia);
-router.post('/priority-messages/templates', DeviceListController.createPriorityMessageTemplate);
-router.patch('/priority-messages/templates/:templateId', DeviceListController.updatePriorityMessageTemplate);
-router.delete('/priority-messages/templates/:templateId', DeviceListController.deletePriorityMessageTemplate);
+router.post('/priority-messages/templates', auditAction('MESSAGES', 'Dodano szablon komunikatu'), DeviceListController.createPriorityMessageTemplate);
+router.patch('/priority-messages/templates/:templateId', auditAction('MESSAGES', 'Edytowano szablon komunikatu', (req) => req.params.templateId), DeviceListController.updatePriorityMessageTemplate);
+router.delete('/priority-messages/templates/:templateId', auditAction('MESSAGES', 'Usunięto szablon komunikatu', (req) => req.params.templateId), DeviceListController.deletePriorityMessageTemplate);
 router.get('/priority-messages/schedules', DeviceListController.getPriorityMessageSchedules);
-router.post('/priority-messages/schedules', DeviceListController.createPriorityMessageSchedule);
-router.patch('/priority-messages/schedules/:scheduleId', DeviceListController.updatePriorityMessageSchedule);
-router.delete('/priority-messages/schedules/:scheduleId', DeviceListController.deletePriorityMessageSchedule);
+router.post('/priority-messages/schedules', auditAction('MESSAGES', 'Dodano harmonogram komunikatu'), DeviceListController.createPriorityMessageSchedule);
+router.patch('/priority-messages/schedules/:scheduleId', auditAction('MESSAGES', 'Edytowano harmonogram komunikatu', (req) => req.params.scheduleId), DeviceListController.updatePriorityMessageSchedule);
+router.delete('/priority-messages/schedules/:scheduleId', auditAction('MESSAGES', 'Usunięto harmonogram komunikatu', (req) => req.params.scheduleId), DeviceListController.deletePriorityMessageSchedule);
 router.get('/priority-messages/presets', DeviceListController.getPriorityMessagePresets);
-router.post('/priority-messages/presets', DeviceListController.createPriorityMessagePreset);
-router.patch('/priority-messages/presets/:presetId', DeviceListController.updatePriorityMessagePreset);
-router.delete('/priority-messages/presets/:presetId', DeviceListController.deletePriorityMessagePreset);
-router.post('/priority-messages/activate', DeviceListController.activatePriorityMessage);
-router.post('/priority-messages/clear', DeviceListController.clearPriorityMessage);
-router.patch('/display-settings/batch', DeviceListController.batchUpdateDeviceDisplaySettings);
-router.post('/reload-all', DeviceListController.reloadAllTablets);
-router.post('/:id/ban-ip', DeviceListController.banDeviceIp);
+router.post('/priority-messages/presets', auditAction('MESSAGES', 'Dodano zestaw komunikatów'), DeviceListController.createPriorityMessagePreset);
+router.patch('/priority-messages/presets/:presetId', auditAction('MESSAGES', 'Edytowano zestaw komunikatów', (req) => req.params.presetId), DeviceListController.updatePriorityMessagePreset);
+router.delete('/priority-messages/presets/:presetId', auditAction('MESSAGES', 'Usunięto zestaw komunikatów', (req) => req.params.presetId), DeviceListController.deletePriorityMessagePreset);
+router.post('/priority-messages/activate', auditAction('MESSAGES', 'Włączono komunikat na tabletach'), DeviceListController.activatePriorityMessage);
+router.post('/priority-messages/clear', auditAction('MESSAGES', 'Wyłączono komunikat na tabletach'), DeviceListController.clearPriorityMessage);
+router.patch('/display-settings/batch', auditAction('TABLETS', 'Zmieniono ustawienia grupy tabletów',
+    (req) => Array.isArray(req.body?.deviceIds) ? 'Liczba tabletów: ' + req.body.deviceIds.length : undefined),
+DeviceListController.batchUpdateDeviceDisplaySettings);
+router.post('/reload-all', auditAction('TABLETS', 'Zlecono odświeżenie wszystkich tabletów'), DeviceListController.reloadAllTablets);
+router.post('/:id/ban-ip', auditAction('TABLETS', 'Zablokowano adres tabletu'), DeviceListController.banDeviceIp);
 router.post('/:id/request-display-profile', DeviceListController.requestDisplayProfile);
-router.post('/:id/reload', DeviceListController.reloadDevice);
-router.patch('/:id/display-settings', DeviceListController.updateDeviceDisplaySettings);
+router.post('/:id/reload', auditAction('TABLETS', 'Zlecono odświeżenie tabletu'), DeviceListController.reloadDevice);
+router.patch('/:id/display-settings', auditAction('TABLETS', 'Zmieniono ustawienia tabletu'), DeviceListController.updateDeviceDisplaySettings);
 
 /**
  * @swagger
@@ -113,7 +116,7 @@ router.get('/:id', DeviceListController.getDevice);
  *       201:
  *         description: Device created
  */
-router.post('/', DeviceListController.createDevice);
+router.post('/', auditAction('TABLETS', 'Dodano tablet', (req) => req.body?.deviceClassroom), DeviceListController.createDevice);
 
 /**
  * @swagger
@@ -137,7 +140,7 @@ router.post('/', DeviceListController.createDevice);
  *       204:
  *         description: Device updated
  */
-router.put('/:id', DeviceListController.updateDevice);
+router.put('/:id', auditAction('TABLETS', 'Edytowano tablet'), DeviceListController.updateDevice);
 
 /**
  * @swagger
@@ -155,6 +158,6 @@ router.put('/:id', DeviceListController.updateDevice);
  *       204:
  *         description: Device deleted
  */
-router.delete('/:id', DeviceListController.deleteDevice);
+router.delete('/:id', auditAction('TABLETS', 'Usunięto tablet'), DeviceListController.deleteDevice);
 
 export default router;

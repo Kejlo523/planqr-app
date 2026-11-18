@@ -1,46 +1,75 @@
+import { Link } from "react-router-dom";
 import type { AdminPanelView } from "./types";
 
-type AdminNavigationKey = AdminPanelView | "pairing" | "lecturer-preview";
+export type AdminNavigationKey = AdminPanelView | "pairing";
 
-interface NavigationItem {
-  key: AdminNavigationKey;
+type NavigationItem = {
   label: string;
   icon: string;
   active?: boolean;
+} & ({ key: AdminNavigationKey; to?: undefined } | { key: string; to: string });
+
+export interface AdminNavigationGroup {
+  label: string;
+  items: NavigationItem[];
 }
 
 interface AdminPanelSidebarProps {
-  navigationItems: NavigationItem[];
+  groups: AdminNavigationGroup[];
   onItemSelect: (key: AdminNavigationKey) => void;
+  onLinkSelect?: () => void;
+  ariaLabel: string;
+  compact?: boolean;
+  unavailable?: boolean;
   className?: string;
 }
 
 const AdminPanelSidebar = ({
-  navigationItems,
+  groups,
   onItemSelect,
+  onLinkSelect,
+  ariaLabel,
+  compact = false,
+  unavailable = false,
   className,
 }: AdminPanelSidebarProps) => (
   <nav
     className={["admin-nav", className].filter(Boolean).join(" ")}
-    aria-label="Widoki panelu administracyjnego"
+    aria-label={ariaLabel}
+    aria-hidden={unavailable || undefined}
   >
-    <ul className="admin-nav__list">
-      {navigationItems.map((item) => (
-        <li key={item.key} className="admin-nav__item">
-          <button
-            type="button"
-            className={`admin-nav__button${
-              item.active ? " admin-nav__button--active" : ""
-            }`}
-            onClick={() => onItemSelect(item.key)}
-            aria-current={item.active ? "page" : undefined}
-          >
-            <i className={item.icon} aria-hidden="true" />
-            <span>{item.label}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
+    {groups.map(({ label, items }) => (
+      <div className="admin-nav__group" key={label}>
+        <h2 className="admin-nav__section-title">{label}</h2>
+        <ul className="admin-nav__list">
+          {items.map((item) => {
+            const content = <><i className={item.icon} aria-hidden="true" /><span className="admin-nav__label">{item.label}</span></>;
+            return (
+              <li key={item.key} className="admin-nav__item">
+                {item.to !== undefined ? (
+                  <Link to={item.to} className="admin-nav__button"
+                    title={compact ? item.label : undefined}
+                    aria-current={item.active ? "page" : undefined}
+                    tabIndex={unavailable ? -1 : undefined}
+                    onClick={onLinkSelect}>{content}</Link>
+                ) : (
+                  <button
+                    type="button"
+                    className="admin-nav__button"
+                    title={compact ? item.label : undefined}
+                    onClick={() => onItemSelect(item.key)}
+                    aria-current={item.active ? "page" : undefined}
+                    tabIndex={unavailable ? -1 : undefined}
+                  >
+                    {content}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    ))}
   </nav>
 );
 

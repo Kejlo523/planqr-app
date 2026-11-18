@@ -60,6 +60,9 @@ const envSchema = z.object({
     WORKER_SECRET_TOKEN: z.string().optional(),
     KANTECH_MODE: z.enum(["off", "observe", "attendance"]).default("off"),
     KANTECH_DEV_TOOLS: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+    KANTECH_DOOR_IDS: z.string().default("").transform((value) =>
+        [...new Set(value.split(",").map((id) => id.trim()).filter(Boolean))],
+    ).pipe(z.array(z.string().max(64)).max(20)),
     KANTECH_ACTIVE_FROM: z.preprocess(
         (value) => value === "" ? undefined : value,
         z.string().datetime().optional(),

@@ -185,7 +185,9 @@ export default function LessonAttendancePanel({
         {isLoading ? (
           <div className="lesson-attendance__feedback">Wczytywanie listy obecności...</div>
         ) : draft.rows.length === 0 ? (
-          <div className="lesson-attendance__empty-inline">Brak wpisów.</div>
+          <div className="lesson-attendance__empty-inline">
+            {hasSession ? "Brak wpisów." : "Dla tych zajęć nie ma jeszcze sesji obecności."}
+          </div>
         ) : (
           <ul className="lesson-attendance__list">
             {draft.rows.map((row) => (

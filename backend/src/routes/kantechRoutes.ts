@@ -1,14 +1,17 @@
 import { timingSafeEqual } from 'node:crypto';
-import { Request, Response, Router } from 'express';
+import { auditAction } from '../middlewares/auditMiddleware';
+import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
-import { getMonitor, incomingReport, reportReader } from '../attendance/monitor';
-import { ingestScans } from '../attendance/store';
+import { forgetReader, getMonitor, incomingReport, reportReader } from '../attendance/monitor';
+import { attendanceDb, ingestScans } from '../attendance/store';
+import { ensureReaderSetup, listReaders, readerIdSchema, readerInput } from '../attendance/readers';
 import { attendanceScanRateLimiter } from '../middlewares/securityMiddleware';
 import { requireLdapAdmin } from '../middlewares/authMiddleware';
 
 export const kantechIngress = Router();
 export const kantechEvents = Router();
+export const kantechReaders = Router();
 
 const query = z.object({
     readerId: z.string().trim().min(1).max(64).optional(),
@@ -56,7 +59,7 @@ kantechEvents.get('/', requireLdapAdmin, (req, res) => {
     res.json({ mode: env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...getMonitor(parsed.data.readerId, parsed.data.limit) });
 });
 
-async function acceptReport(req: Request, res: Response) {
+async function acceptReport(req: Request, res: Response, worker = false) {
     if (env.KANTECH_MODE === 'off') {
         res.sendStatus(404);
         return;
@@ -67,6 +70,12 @@ async function acceptReport(req: Request, res: Response) {
         return;
     }
     try {
+        if (worker && !await attendanceDb.attendanceReader.findUnique({
+            where: { id: report.data.readerId }, select: { id: true },
+        })) {
+            res.sendStatus(204);
+            return;
+        }
         reportReader(report.data.readerId, report.data.state);
         await ingestScans(report.data.readerId, report.data.events);
         res.sendStatus(204);
@@ -75,13 +84,73 @@ async function acceptReport(req: Request, res: Response) {
     }
 }
 
-kantechEvents.post('/', requireLdapAdmin, attendanceScanRateLimiter, acceptReport);
-kantechIngress.post('/', attendanceScanRateLimiter, async (req, res) => {
+kantechEvents.post('/', requireLdapAdmin, attendanceScanRateLimiter, (req, res) => void acceptReport(req, res));
+
+function requireWorker(req: Request, res: Response, next: NextFunction) {
     const expected = Buffer.from('Bearer ' + (env.WORKER_SECRET_TOKEN ?? ''));
     const provided = Buffer.from(req.get('authorization') ?? '');
     if (!env.WORKER_SECRET_TOKEN || expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
         res.sendStatus(401);
         return;
     }
-    await acceptReport(req, res);
+    next();
+}
+
+kantechIngress.use(requireWorker);
+kantechIngress.get('/readers', async (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+        const readers = await listReaders();
+        res.json({ readerIds: readers.map(({ id }) => id) });
+    } catch {
+        res.sendStatus(503);
+    }
+});
+kantechIngress.post('/', attendanceScanRateLimiter, (req, res) => void acceptReport(req, res, true));
+
+kantechReaders.use(requireLdapAdmin, (_req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+});
+
+kantechReaders.get('/', async (_req, res) => {
+    try {
+        res.json({ readers: await listReaders(), devTools: env.KANTECH_DEV_TOOLS });
+    } catch {
+        res.status(503).json({ message: 'Nie udało się pobrać czytników.' });
+    }
+});
+
+kantechReaders.post('/', auditAction('KANTECH', 'Zapisano czytnik', (req) => req.body?.id), async (req, res) => {
+    const input = readerInput.safeParse(req.body);
+    if (!input.success) {
+        const assignmentError = input.error.issues.find(({ code }) => code === 'custom');
+        res.status(400).json({ message: assignmentError?.message ?? 'Sprawdź ID, nazwę i dane sali.' });
+        return;
+    }
+    try {
+        await ensureReaderSetup();
+        const reader = input.data;
+        res.json(await attendanceDb.attendanceReader.upsert({
+            where: { id: reader.id }, create: reader, update: reader,
+        }));
+    } catch {
+        res.status(503).json({ message: 'Nie udało się zapisać czytnika.' });
+    }
+});
+
+kantechReaders.delete('/:id', auditAction('KANTECH', 'Usunięto czytnik'), async (req, res) => {
+    const id = readerIdSchema.safeParse(req.params.id);
+    if (!id.success) {
+        res.status(400).json({ message: 'Nieprawidłowe ID czytnika.' });
+        return;
+    }
+    try {
+        await ensureReaderSetup();
+        await attendanceDb.attendanceReader.deleteMany({ where: { id: id.data } });
+        forgetReader(id.data);
+        res.sendStatus(204);
+    } catch {
+        res.status(503).json({ message: 'Nie udało się usunąć czytnika.' });
+    }
 });

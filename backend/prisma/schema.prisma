@@ -239,6 +239,36 @@ model AttendanceReader {
   label      String
 }
 
+model KantechReaderSetup {
+  id Int @id
+}
+
+enum AuditCategory {
+  AUTH
+  TABLETS
+  MESSAGES
+  ADMIN
+  ATTENDANCE
+  KANTECH
+}
+
+model AuditEvent {
+  id         Int           @id @default(autoincrement())
+  occurredAt DateTime      @default(now()) @db.Timestamptz(3)
+  category   AuditCategory
+  actor      String
+  action     String
+  target     String?
+
+  @@index([occurredAt])
+  @@index([category, id])
+}
+
+model AuditSettings {
+  id            Int @id
+  retentionDays Int @default(30)
+}
+
 model AttendanceCard {
   alias      String  @id
   login      String

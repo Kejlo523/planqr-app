@@ -10,6 +10,7 @@ import {
 import { createAccessToken, decodeIdentityClaimsFromToken } from '../services/authTokenService';
 import { upsertAuthenticatedLdapUser } from '../services/ldapUserCacheService';
 import { getRootAdminLogin, isRootAdminLogin, verifyRootAdminCredentials } from '../services/rootAdminService';
+import { writeAuditEvent } from '../services/auditLogService';
 
 const ldapService = new LdapService();
 
@@ -86,6 +87,7 @@ export class AuthController {
                     sameSite: env.NODE_ENV === 'production' ? 'strict' : 'lax'
                 });
 
+                writeAuditEvent({ category: 'AUTH', action: 'Zalogowano się', actor: user.login, target: 'Konto awaryjne' });
                 return res.status(200).json(toSessionResponse(user, 'Login successful'));
             }
 
@@ -110,6 +112,7 @@ export class AuthController {
                     sameSite: env.NODE_ENV === 'production' ? 'strict' : 'lax'
                 });
 
+                writeAuditEvent({ category: 'AUTH', action: 'Zalogowano się', actor: user.login, target: 'Tryb deweloperski' });
                 return res.status(200).json(toSessionResponse(user, 'Login successful'));
             }
 
@@ -168,6 +171,7 @@ export class AuthController {
                     sameSite: env.NODE_ENV === 'production' ? 'strict' : 'lax'
                 });
 
+                writeAuditEvent({ category: 'AUTH', action: 'Zalogowano się', actor: user.login, target: 'LDAP' });
                 return res.status(200).json(toSessionResponse(user, 'Login successful'));
             }
 
@@ -183,6 +187,9 @@ export class AuthController {
     }
 
     static async logout(req: Request, res: Response) {
+        const token = req.cookies?.jwt;
+        const identity = typeof token === 'string' ? decodeIdentityClaimsFromToken(token) : null;
+        if (identity) writeAuditEvent({ category: 'AUTH', action: 'Wylogowano się', actor: identity.sub });
         res.clearCookie('jwt');
         return res.status(200).json({ message: 'Logout successful' });
     }

@@ -19,6 +19,9 @@ async function main() {
     const prisma = new PrismaClient();
     try {
         await prisma.$transaction([
+            ...(values.readers.length ? [prisma.kantechReaderSetup.upsert({
+                where: { id: 1 }, create: { id: 1 }, update: {},
+            })] : []),
             ...values.readers.map((reader) => {
                 const data = { ...reader, buildingId: normalizeRoom(reader.buildingId), roomNumber: normalizeRoom(reader.roomNumber) };
                 return prisma.attendanceReader.upsert({ where: { id: reader.id }, create: data, update: data });

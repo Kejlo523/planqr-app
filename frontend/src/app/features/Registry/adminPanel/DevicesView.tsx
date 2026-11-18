@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AdminPanelSearchField from "./AdminPanelSearchField";
 import AdminDevicesTable from "./AdminDevicesTable";
 import AdminPanelSection from "./AdminPanelSection";
@@ -11,37 +11,6 @@ import type {
   PriorityMessageTemplate,
   Tone,
 } from "./types";
-
-const MOBILE_BREAKPOINT_PX = 720;
-
-const useIsMobileViewport = () => {
-  const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth <= MOBILE_BREAKPOINT_PX : false,
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
-    const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
-      setIsMobile(event.matches);
-    };
-
-    handleChange(mediaQuery);
-
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleChange);
-      return () => mediaQuery.removeEventListener("change", handleChange);
-    }
-
-    mediaQuery.addListener(handleChange);
-    return () => mediaQuery.removeListener(handleChange);
-  }, []);
-
-  return isMobile;
-};
 
 interface DeviceCounts {
   all: number;
@@ -180,12 +149,7 @@ const DevicesView = ({
   onPairingRoomSuggestionSelect,
   onAssignPairingDevice,
 }: DevicesViewProps) => {
-  const isMobile = useIsMobileViewport();
-  const [collapsedSections, setCollapsedSections] = useState({
-    assignment: false,
-    stats: false,
-    batch: false,
-  });
+  const [assignmentCollapsed, setAssignmentCollapsed] = useState(true);
   const hasPairedDevices = activeDevices.length > 0;
   const hasPriorityTemplates = priorityMessageTemplates.length > 0;
   const selectAllRef = useRef<HTMLInputElement | null>(null);
@@ -198,31 +162,28 @@ const DevicesView = ({
     selectedCount > 0 &&
     visibleDeviceIds.some((deviceId) => selectedIds.has(deviceId)) &&
     !allActiveSelected;
-  const statsColumnsClass = "admin-status-strip--cols-4";
-  const statusItems = useMemo(() => {
-    const lightThemeCount = activeDevices.filter((device) => device.displayTheme === "light").length;
-    const darkThemeCount = activeDevices.filter((device) => device.displayTheme === "dark").length;
-    const blackScreenCount = activeDevices.filter((device) => device.effectiveBlackScreen).length;
-    const priorityMessageCount = activeDevices.filter(
-      (device) => device.priorityMessage?.enabled,
-    ).length;
+  const statusItems = [
+    { label: "Wszystkie", value: counts.all, tone: "neutral" },
+    { label: "Online", value: counts.online, tone: "success" },
+    { label: "Offline", value: counts.offline, tone: "danger" },
+    { label: "Oczekujące", value: counts.pending, tone: "warning" },
+  ];
 
-    return [
-      { label: "Wszystkie", value: counts.all, tone: "neutral" },
-      { label: "Online", value: counts.online, tone: "success" },
-      { label: "Offline", value: counts.offline, tone: "danger" },
-      { label: "Oczekujące", value: counts.pending, tone: "warning" },
-      { label: "Jasny", value: lightThemeCount, tone: "neutral" },
-      { label: "Ciemny", value: darkThemeCount, tone: "neutral" },
-      { label: "Czarny ekran", value: blackScreenCount, tone: "warning" },
-      { label: "Komunikat", value: priorityMessageCount, tone: "warning" },
-    ] as const;
-  }, [activeDevices, counts.all, counts.offline, counts.online, counts.pending]);
+  const screenItems = [
+    { label: "Motyw jasny", value: activeDevices.filter((device) => device.displayTheme === "light").length },
+    { label: "Motyw ciemny", value: activeDevices.filter((device) => device.displayTheme === "dark").length },
+    { label: "Czarny ekran", value: activeDevices.filter((device) => device.effectiveBlackScreen).length },
+    { label: "Komunikat", value: activeDevices.filter((device) => device.priorityMessage?.enabled).length },
+  ];
 
   const emptyStateTitle = loading ? "Ładowanie urządzeń" : "Brak sparowanych tabletów";
   const emptyStateDescription = loading
     ? "Trwa pobieranie listy tabletów."
     : "Przypisz tablet kodem, aby pojawił się tutaj.";
+
+  useEffect(() => {
+    if (pairingDevice) setAssignmentCollapsed(false);
+  }, [pairingDevice]);
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -232,13 +193,6 @@ const DevicesView = ({
 
   const pairedDevicesTitle =
     selectedCount > 0 ? `Sparowane tablety (${selectedCount})` : "Sparowane tablety";
-
-  const toggleSection = useCallback((section: keyof typeof collapsedSections) => {
-    setCollapsedSections((current) => ({
-      ...current,
-      [section]: !current[section],
-    }));
-  }, []);
 
   const batchActionsContent = (
     <>
@@ -350,11 +304,67 @@ const DevicesView = ({
 
   return (
     <div className="admin-devices-view">
-      <div className="admin-devices-view__overview">
+      <AdminPanelSection
+        className="admin-devices-view__stats"
+        title="Stan tabletów"
+        actions={
+          <>
+            <button
+              type="button"
+              className="admin-button admin-button--secondary admin-button--small"
+              onClick={onRefresh}
+              disabled={manualRefreshing}
+            >
+              <i
+                className={`fas fa-sync-alt ${manualRefreshing ? "fa-spin" : ""}`}
+                aria-hidden="true"
+              />
+              Odśwież
+            </button>
+            <button
+              type="button"
+              className="admin-button admin-button--ghost admin-button--small"
+              onClick={onReloadTablets}
+              disabled={reloadingTablets || !hasPairedDevices}
+            >
+              <i
+                className={`fas fa-bolt ${reloadingTablets ? "fa-spin" : ""}`}
+                aria-hidden="true"
+              />
+              {reloadingTablets ? "Wysyłanie" : "Przeładuj tablety"}
+            </button>
+          </>
+        }
+      >
+        <div
+          className="admin-status-strip admin-status-strip--cols-4"
+          aria-label="Status urządzeń"
+        >
+          {statusItems.map((item) => (
+            <div
+              key={item.label}
+              className={`admin-status-strip__item admin-status-strip__item--${item.tone}`}
+            >
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
+          ))}
+        </div>
+        {hasPairedDevices && (
+          <details className="admin-devices-view__screen-status">
+            <summary>Stan ekranów</summary>
+            <dl>
+              {screenItems.map(({ label, value }) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+            </dl>
+          </details>
+        )}
+      </AdminPanelSection>
+
+      <div className="admin-devices-view__overview admin-devices-view__overview--assignment">
         <PendingDeviceAssignmentSection
           pendingDevicesCount={pendingDevices.length}
-          collapsible={isMobile}
-          collapsed={isMobile ? collapsedSections.assignment : false}
+          collapsible
+          collapsed={assignmentCollapsed}
           codeValue={pairingCode}
           codeSuggestions={pairingSuggestions}
           selectedDevice={pairingDevice}
@@ -370,83 +380,12 @@ const DevicesView = ({
           onCodeSuggestionSelect={onPairingSuggestionSelect}
           onLookup={onLookupPairingDevice}
           onReset={onResetPairing}
-          onToggleCollapsed={() => toggleSection("assignment")}
+          onToggleCollapsed={() => setAssignmentCollapsed((collapsed) => !collapsed)}
           onRoomChange={onPairingRoomChange}
           onRoomSuggestionSelect={onPairingRoomSuggestionSelect}
           onAssign={onAssignPairingDevice}
         />
-
-        <AdminPanelSection
-          className="admin-devices-view__stats"
-          title="Statystyki"
-          collapsible={isMobile}
-          collapsed={isMobile ? collapsedSections.stats : false}
-          onToggleCollapsed={() => toggleSection("stats")}
-          actions={
-            <>
-              <button
-                type="button"
-                className="admin-button admin-button--secondary admin-button--small"
-                onClick={onRefresh}
-                disabled={manualRefreshing}
-              >
-                <i
-                  className={`fas fa-sync-alt ${manualRefreshing ? "fa-spin" : ""}`}
-                  aria-hidden="true"
-                />
-                Odśwież
-              </button>
-              <button
-                type="button"
-                className="admin-button admin-button--primary admin-button--small"
-                onClick={onReloadTablets}
-                disabled={reloadingTablets}
-              >
-                <i
-                  className={`fas fa-bolt ${reloadingTablets ? "fa-spin" : ""}`}
-                  aria-hidden="true"
-                />
-                {reloadingTablets ? "Wysyłanie" : "Przeładuj tablety"}
-              </button>
-            </>
-          }
-        >
-          <div
-            className={`admin-status-strip ${statsColumnsClass}`}
-            aria-label="Status urządzeń"
-          >
-            {statusItems.map((item) => (
-              <div
-                key={item.label}
-                className={`admin-status-strip__item admin-status-strip__item--${item.tone}`}
-              >
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-              </div>
-            ))}
-          </div>
-        </AdminPanelSection>
-
-        <AdminPanelSection
-          className="admin-devices-view__batch"
-          title="Operacje zbiorowe"
-          collapsible={isMobile}
-          collapsed={isMobile ? collapsedSections.batch : false}
-          onToggleCollapsed={() => toggleSection("batch")}
-          actions={
-            <div className="admin-status-inline">
-              <span>
-                Zaznaczone: <strong>{selectedCount}</strong>
-              </span>
-            </div>
-          }
-        >
-          <div className="admin-batch-panel">
-            <div className="admin-table__batch-actions">{batchActionsContent}</div>
-          </div>
-        </AdminPanelSection>
       </div>
-
       <AdminPanelSection
         className="admin-devices-view__list"
         title={pairedDevicesTitle}
@@ -464,6 +403,14 @@ const DevicesView = ({
           ) : undefined
         }
       >
+        {selectedCount > 0 && (
+          <details className="admin-devices-view__selection">
+            <summary>Operacje dla zaznaczonych ({selectedCount})</summary>
+            <div className="admin-batch-panel">
+              <div className="admin-table__batch-actions">{batchActionsContent}</div>
+            </div>
+          </details>
+        )}
         {!hasPairedDevices ? (
           <div className="admin-empty-state">
             <h3>{emptyStateTitle}</h3>

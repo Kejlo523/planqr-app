@@ -12,6 +12,7 @@ import registryRoutes from "./routes/registryRoutes";
 import lessonRoutes from "./routes/lessonRoutes";
 import attendanceRoutes from "./routes/attendanceRoutes";
 import adminRoutes from "./routes/adminRoutes";
+import auditRoutes from "./routes/auditRoutes";
 import statusRoutes from "./routes/statusRoutes";
 import cookieParser from "cookie-parser";
 import https from "https";
@@ -20,9 +21,10 @@ import path from "path";
 import { applyBasicSecurityHeaders } from "./middlewares/securityMiddleware";
 import { startLdapUserSyncJob } from "./jobs/ldapUserSyncJob";
 import { startPriorityMessageScheduleJob } from "./jobs/priorityMessageScheduleJob";
-import { kantechEvents, kantechIngress } from './routes/kantechRoutes';
+import { kantechEvents, kantechIngress, kantechReaders } from './routes/kantechRoutes';
 import { kantechDevRoutes } from './routes/kantechDevRoutes';
 import { startAttendanceJob } from './attendance/store';
+import { startAuditCleanup } from './services/auditLogService';
 
 
 const app = express();
@@ -54,10 +56,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/admins', adminRoutes);
+app.use('/api/audit', auditRoutes);
 app.use('/api/registry', registryRoutes);
 app.use('/api/Lesson', lessonRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/kantech/events', kantechEvents);
+app.use('/api/kantech/readers', kantechReaders);
 app.use('/api/kantech/dev', kantechDevRoutes);
 app.use('/internal/kantech', kantechIngress);
 app.use(statusRoutes);
@@ -113,6 +117,7 @@ startCleanupJob();
 startLdapUserSyncJob();
 startPriorityMessageScheduleJob();
 startAttendanceJob();
+startAuditCleanup();
 
 
 

@@ -35,44 +35,6 @@ body.lecturer-console-scroll-root {
   --lecturer-attendance-width: clamp(21rem, 38vw, 24rem);
 }
 
-.lecturer-console__appbar {
-  box-shadow: none;
-}
-
-.lecturer-console[data-admin-preview="true"] .lecturer-console__appbar {
-  flex-wrap: wrap;
-}
-
-.lecturer-console__appbar-actions {
-  gap: 0.5rem;
-}
-
-.lecturer-console__appbar-groups {
-  flex: 1 1 40rem;
-  min-width: min(100%, 30rem);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.85rem;
-}
-
-.lecturer-console__appbar-group--preview {
-  flex: 1 1 34rem;
-}
-
-.lecturer-console__appbar-group--standard {
-  flex: 0 0 auto;
-  justify-content: flex-end;
-}
-
-.lecturer-console__appbar-separator {
-  width: 1px;
-  min-height: 2.5rem;
-  align-self: stretch;
-  background: var(--admin-border);
-  opacity: 0.75;
-}
-
 .lecturer-console__shell {
   flex: 1;
   min-height: 0;
@@ -134,8 +96,7 @@ body.lecturer-console-scroll-root {
 
 .lecturer-console__surface-title h1 {
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.15;
+  font: 600 clamp(1.6rem, 3vw, 2.35rem)/1.1 var(--pq-heading);
   color: var(--admin-text);
 }
 
@@ -181,7 +142,7 @@ body.lecturer-console-scroll-root {
   border-right: 0;
 }
 
-.lecturer-console__view-button--active {
+.lecturer-console__view-button[aria-pressed="true"] {
   background: var(--admin-accent-soft);
   color: var(--admin-accent-text);
 }
@@ -192,14 +153,40 @@ body.lecturer-console-scroll-root {
   overflow: hidden;
 }
 
-.lecturer-console__appbar-preview {
-  flex: 1 1 34rem;
-  min-width: min(100%, 26rem);
+.lecturer-console__teacher-search {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: .45rem;
+  width: min(100%, 36rem);
+}
+
+.lecturer-console__calendar-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: .75rem;
+  padding: .55rem 1rem;
+  border-bottom: 1px solid var(--admin-border);
+  background: var(--admin-surface-muted);
+}
+
+.lecturer-console__calendar-date {
+  justify-self: center;
+  color: var(--admin-text);
+  font: 600 1.25rem/1.2 var(--pq-heading);
+  text-align: center;
+}
+
+.lecturer-console__search-icon {
+  position: absolute;
+  left: .7rem;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: var(--admin-text-muted);
+  pointer-events: none;
 }
 
 .lecturer-console__preview-autocomplete {
@@ -223,7 +210,7 @@ body.lecturer-console-scroll-root {
   box-shadow: 0 0 0 3px var(--admin-accent-soft);
 }
 
-.lecturer-console__appbar-preview .admin-button {
+.lecturer-console__teacher-search .admin-button {
   flex-shrink: 0;
 }
 
@@ -236,6 +223,14 @@ body.lecturer-console-scroll-root {
 .lecturer-console__calendar-frame .fc {
   height: 100%;
   width: 100%;
+  --fc-page-bg-color: var(--pq-surface);
+  --fc-neutral-bg-color: var(--pq-raised);
+  --fc-neutral-text-color: var(--pq-muted);
+  --fc-border-color: var(--pq-line);
+  --fc-now-indicator-color: var(--pq-green);
+  --fc-today-bg-color: color-mix(in srgb, var(--pq-accent-soft) 53%, var(--pq-surface));
+  --fc-more-link-bg-color: var(--pq-raised);
+  --fc-more-link-text-color: var(--pq-ink);
 }
 
 .lecturer-console__calendar-frame .fc-view-harness {
@@ -245,93 +240,187 @@ body.lecturer-console-scroll-root {
   margin: 0;
 }
 
-.lecturer-console__calendar-frame .fc-theme-standard,
-.lecturer-console__calendar-frame .fc-theme-standard .fc-scrollgrid {
-  --fc-page-bg-color: transparent !important;
-  --fc-neutral-bg-color: transparent !important;
-  --fc-border-color: var(--admin-border) !important;
-  --fc-now-indicator-color: #b42318 !important;
-  --fc-today-bg-color: var(--admin-accent-soft) !important;
-  --fc-event-border-color: transparent !important;
+.lecturer-console__calendar-frame .fc .fc-scrollgrid {
+  border-top: 0;
+  border-left: 0;
 }
 
-.lecturer-console__calendar-frame .fc .fc-scrollgrid,
-.lecturer-console__calendar-frame .fc .fc-daygrid-body,
-.lecturer-console__calendar-frame .fc .fc-daygrid-day-frame,
-.lecturer-console__calendar-frame .fc .fc-timegrid-col,
-.lecturer-console__calendar-frame .fc .fc-timegrid-slot,
-.lecturer-console__calendar-frame .fc .fc-timegrid-axis,
-.lecturer-console__calendar-frame .fc .fc-col-header-cell {
-  background: transparent !important;
+.lecturer-console__calendar-frame .fc .fc-col-header-cell,
+.lecturer-console__calendar-frame .fc .fc-scrollgrid-section-header .fc-timegrid-axis {
+  border-bottom-color: var(--pq-line-strong);
+  background: var(--pq-nav);
+}
+
+.lecturer-console__calendar-frame .fc .fc-timegrid-slot-minor {
+  border-top-color: color-mix(in srgb, var(--pq-line) 42%, transparent);
+  border-top-style: solid;
+}
+
+.lecturer-console__calendar-frame .fc .fc-timegrid-slot {
+  height: 1.55rem;
+}
+
+.lecturer-console__calendar-frame .fc .fc-timegrid-axis {
+  background: var(--pq-nav);
 }
 
 .lecturer-console__calendar-frame .fc .fc-col-header-cell-cushion,
 .lecturer-console__calendar-frame .fc .fc-timegrid-axis-cushion {
-  padding: 0.7rem 0.4rem;
-  color: var(--admin-text-muted) !important;
+  padding: .65rem .35rem;
+  color: var(--admin-text-muted);
   font-size: 0.76rem;
   font-weight: 600;
 }
 
-.lecturer-console__calendar-frame .fc .fc-timegrid-slot-label-cushion {
-  padding-inline: 0.5rem;
-  color: var(--admin-text-soft) !important;
-  font-size: 0.76rem;
+.lecturer-console__day-heading {
+  display: grid;
+  gap: .2rem;
+  line-height: 1.12;
 }
 
-.lecturer-console__calendar-frame .fc .fc-daygrid-day.fc-day-today,
-.lecturer-console__calendar-frame .fc .fc-timegrid-col.fc-day-today {
-  background: var(--admin-accent-soft) !important;
+.lecturer-console__day-heading span {
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: .69rem;
+}
+
+.lecturer-console__day-heading strong {
+  font: 600 1.3rem/1.12 var(--pq-heading);
+  color: var(--pq-ink);
+}
+
+.lecturer-console__day-heading[data-today="true"] :is(span, strong) {
+  color: var(--pq-accent-text);
+}
+
+.lecturer-console__calendar-frame .fc .fc-timegrid-slot-label-cushion {
+  padding-inline: .6rem;
+  color: var(--admin-text-soft);
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .lecturer-console__calendar-frame .fc .fc-col-header-cell.fc-day-today {
-  background: var(--admin-accent-soft) !important;
+  background: var(--pq-accent-soft);
 }
 
-.lecturer-console__calendar-frame .fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
-  color: var(--admin-accent-text) !important;
-  font-weight: 700;
-}
-
-.lecturer-console__calendar-frame .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-number,
-.lecturer-console__calendar-frame .fc .fc-daygrid-day.fc-day-today .fc-daygrid-day-top {
-  color: var(--admin-accent-text) !important;
+.lecturer-console__calendar-frame .fc .fc-daygrid-day-number {
+  color: var(--pq-ink);
 }
 
 .lecturer-console__calendar-frame .fc-event {
-  border-radius: calc(var(--admin-radius) + 3px);
+  border-radius: 4px;
   box-shadow: none;
 }
 
-.lecturer-console__calendar-frame .lecturer-console__calendar-event--selected {
-  outline: 2px solid color-mix(in srgb, var(--admin-accent) 76%, white);
+.lecturer-console__calendar-frame .fc-event.lecturer-console__calendar-event {
+  --lesson-color: var(--lesson-day, #b8c9e0);
+  --lesson-strength: 76%;
+  --fc-event-bg-color: color-mix(in srgb, var(--lesson-color) var(--lesson-strength), var(--pq-surface));
+  --fc-event-text-color: var(--pq-ink);
+  --fc-event-border-color: color-mix(in srgb, var(--lesson-color) 75%, var(--pq-line));
+  border-left: 3px solid color-mix(in srgb, var(--lesson-color) 75%, var(--pq-ink));
+  background: var(--fc-event-bg-color);
+  cursor: pointer;
+}
+
+.lecturer-console[data-admin-theme="dark"] .lecturer-console__calendar-frame .fc-event.lecturer-console__calendar-event {
+  --lesson-color: var(--lesson-night, #50678a);
+  --lesson-strength: 78%;
+}
+
+.lecturer-console__calendar-event--lecture { --lesson-day: #b9c8e8; --lesson-night: #596a91; }
+.lecturer-console__calendar-event--lab { --lesson-day: #d7bce2; --lesson-night: #785082; }
+.lecturer-console__calendar-event--exercise { --lesson-day: #a9ddd5; --lesson-night: #3d7971; }
+.lecturer-console__calendar-event--exam { --lesson-day: #e8b2ae; --lesson-night: #934f4b; }
+.lecturer-console__calendar-event--project { --lesson-day: #a9d8d2; --lesson-night: #3d756f; }
+.lecturer-console__calendar-event--seminar { --lesson-day: #bbd8c2; --lesson-night: #4b7356; }
+.lecturer-console__calendar-event--language { --lesson-day: #b4d1e1; --lesson-night: #466c82; }
+
+.lecturer-console__calendar-frame .lecturer-console__calendar-event--selected,
+.lecturer-console__calendar-frame .lecturer-console__calendar-event:focus-visible {
+  outline: 2px solid var(--pq-focus);
   outline-offset: 1px;
 }
 
 .lecturer-console__calendar-frame .lecturer-console__calendar-event--has-notifications {
-  border: 2px solid #f97316 !important;
+  border-right: 3px solid var(--admin-warning);
 }
 
 .lecturer-console__event {
-  display: grid;
-  gap: 0.12rem;
+  display: flex;
+  flex-direction: column;
+  gap: .12rem;
+  min-width: 0;
+  padding: .28rem .38rem;
+  color: var(--pq-ink);
+  line-height: 1.2;
+  background: color-mix(in srgb, var(--lesson-custom, transparent) 17%, transparent);
+}
+
+.lecturer-console__calendar-frame .fc-timegrid-event .lecturer-console__event {
+  height: 100%;
+  overflow: hidden;
+  container: lesson-tile / size;
+}
+
+.lecturer-console__event-title-space {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
 
 .lecturer-console__event-time {
-  font-size: 0.68rem;
-  font-weight: 700;
-  opacity: 0.88;
+  font-size: .7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lecturer-console__event-title {
-  font-size: 0.8rem;
-  font-weight: 700;
-  line-height: 1.15;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lesson-title-lines, 1);
+  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: clamp(.64rem, 8cqi, .91rem);
+  font-weight: 600;
+  line-height: 1.16;
 }
 
 .lecturer-console__event-room {
-  font-size: 0.7rem;
-  opacity: 0.84;
+  font-size: .72rem;
+  color: var(--pq-muted);
+  flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lecturer-console__calendar-frame .fc-daygrid-event .lecturer-console__event {
+  padding: .15rem .2rem;
+}
+
+.lecturer-console__calendar-frame .fc-daygrid-event .lecturer-console__event-title {
+  font-size: .76rem;
+}
+
+.lecturer-console__calendar-frame .fc-daygrid-event .lecturer-console__event-room {
+  display: none;
+}
+
+@container lesson-tile (max-width: 64px) or (max-height: 36px) {
+  .lecturer-console__event-room { display: none; }
+  .lecturer-console__event-time { font-size: .61rem; }
+}
+
+@container lesson-tile (max-height: 21px) {
+  .lecturer-console__event-time { display: none; }
 }
 
 .lecturer-console__panel-shell {
@@ -686,21 +775,10 @@ body.lecturer-console-scroll-root {
 }
 
 @media (max-width: 1280px) {
-  .lecturer-console__appbar-groups {
-    flex-basis: 100%;
-    justify-content: flex-start;
-  }
-
-  .lecturer-console__appbar-preview {
-    justify-content: flex-start;
-  }
-
   .lecturer-console__preview-autocomplete {
     width: min(100%, 18rem);
   }
 
-  .lecturer-console__surface-header,
-  .lecturer-console__surface-actions,
   .lecturer-console__panel-header,
   .lecturer-console__panel-strip,
   .lecturer-console__panel-footer,
@@ -712,25 +790,12 @@ body.lecturer-console-scroll-root {
     align-items: stretch;
   }
 
-  .lecturer-console__panel-header-actions,
-  .lecturer-console__surface-actions {
+  .lecturer-console__panel-header-actions {
     justify-content: flex-start;
   }
 }
 
 @media (max-width: 720px) {
-  .lecturer-console .admin-console__appbar {
-    display: flex;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-  }
-
-  .lecturer-console .admin-console__brand,
-  .lecturer-console .admin-console__appbar-actions {
-    display: flex;
-  }
-
   .lecturer-console__shell {
     padding: 0.5rem;
   }
@@ -741,35 +806,6 @@ body.lecturer-console-scroll-root {
   .lecturer-console__panel-section,
   .lecturer-console__panel-footer {
     padding-inline: 0.75rem;
-  }
-
-  .lecturer-console__appbar-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .lecturer-console__appbar-groups {
-    width: 100%;
-    min-width: 0;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
-
-  .lecturer-console__appbar-preview {
-    width: 100%;
-    min-width: 0;
-    justify-content: flex-start;
-  }
-
-  .lecturer-console__appbar-group--standard {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .lecturer-console__appbar-separator {
-    width: 100%;
-    min-height: 1px;
-    height: 1px;
   }
 
   .lecturer-console__preview-autocomplete {
@@ -787,4 +823,53 @@ body.lecturer-console-scroll-root {
   .lecturer-console__floating-panel {
     right: 0.5rem;
   }
+}
+
+.lecturer-console__teacher-search .lecturer-console__preview-autocomplete {
+  flex: 1 1 12rem;
+  width: auto;
+}
+
+.lecturer-console__teacher-search .lecturer-console__preview-input {
+  min-height: 2.55rem;
+  padding-left: 2rem;
+  border-color: var(--pq-line-strong);
+  background: var(--pq-surface);
+  font-size: 1rem;
+}
+
+.lecturer-console__teacher-suggestions [aria-selected="true"] {
+  background: var(--pq-accent-soft);
+  color: var(--pq-accent-text);
+}
+
+@media (max-width: 850px) {
+  .lecturer-console__surface-header { flex-wrap: wrap; }
+  .lecturer-console__teacher-search { justify-content: flex-start; }
+}
+
+@media (max-width: 600px) {
+  .lecturer-console__calendar-frame:has(.fc-timeGridWeek-view) {
+    overflow-x: auto;
+  }
+  .lecturer-console__calendar-frame .fc:has(.fc-timeGridWeek-view) {
+    min-width: 47rem;
+  }
+  .lecturer-console__calendar-toolbar {
+    grid-template-columns: 1fr auto;
+    gap: .45rem;
+    padding: .45rem .65rem;
+  }
+  .lecturer-console__calendar-date {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: start;
+    text-align: left;
+    font-size: 1.12rem;
+  }
+  .lecturer-console__calendar-nav { gap: .2rem; }
+  .lecturer-console__calendar-nav .admin-icon-button,
+  .lecturer-console__calendar-toolbar > div > .admin-icon-button { width: 1.7rem; min-height: 1.75rem; padding: .2rem; }
+  .lecturer-console__surface-actions { gap: .25rem; }
+  .lecturer-console__view-button { min-height: 1.9rem; padding: .25rem .35rem; font-size: .74rem; }
 }

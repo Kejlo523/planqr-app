@@ -8,12 +8,21 @@ import AttendancePanel from "../features/AttendancePanel";
 import ProtectedRoute from "./ProtectedRoute";
 import AccessDenied from "../features/AccessDenied";
 import KantechMonitor from "../features/Registry/KantechMonitor";
+import AdminAuditLog from "../features/Registry/AdminAuditLog";
 
 export const routes: RouteObject[] = [
     {
         path: '/',
         element: <App />,
         children: [
+            {
+                path: 'adminpanel/logi',
+                element: (
+                    <ProtectedRoute requirement="admin">
+                        <AdminAuditLog />
+                    </ProtectedRoute>
+                )
+            },
             {
                 path: 'adminpanel/kantech',
                 element: (

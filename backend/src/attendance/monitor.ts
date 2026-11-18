@@ -45,6 +45,10 @@ export function reportReader(readerId: string, state: 'connected' | 'unavailable
     readers.set(readerId, { state, checkedAt: new Date().toISOString() });
 }
 
+export function forgetReader(readerId: string) {
+    readers.delete(readerId);
+}
+
 export function reportScan(scan: IncomingScan, outcome: string, assigned = false) {
     const existing = events.get(scan.key);
     if (existing) return;

@@ -1,5 +1,24 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap");
 :root {
+  --pq-canvas: #eaf1f5;
+  --pq-surface: #f9fbfc;
+  --pq-raised: #e1ebf1;
+  --pq-line: #cfdce4;
+  --pq-line-strong: #8b9eab;
+  --pq-ink: #152936;
+  --pq-muted: #416071;
+  --pq-accent: #174e79;
+  --pq-accent-hover: #113f63;
+  --pq-accent-text: #174e79;
+  --pq-accent-soft: #ddebf5;
+  --pq-accent-line: #9dbfd6;
+  --pq-focus: #21768b;
+  --pq-nav: #f1f7f8;
+  --pq-green: #226751;
+  --pq-green-soft: #dcece6;
+  --pq-ochre: #765017;
+  --pq-ochre-soft: #f3e9d4;
+  --pq-heading: "Barlow Semi Condensed", "Segoe UI", sans-serif;
   /* Colors - Default Dark Theme */
   --bg-main: #0f172a;
   --bg-surface: #1e293b;
@@ -68,6 +87,24 @@
 }
 
 [data-theme='dark'] {
+  --pq-canvas: #111c24;
+  --pq-surface: #182731;
+  --pq-raised: #20333e;
+  --pq-line: #304855;
+  --pq-line-strong: #64818e;
+  --pq-ink: #eef7fa;
+  --pq-muted: #b0c7d3;
+  --pq-accent: #205781;
+  --pq-accent-hover: #1a496e;
+  --pq-accent-text: #9fd0f1;
+  --pq-accent-soft: #203a4c;
+  --pq-accent-line: #3b6075;
+  --pq-focus: #9fd0f1;
+  --pq-nav: #15242d;
+  --pq-green: #97d8bf;
+  --pq-green-soft: #203e37;
+  --pq-ochre: #e8c587;
+  --pq-ochre-soft: #493b29;
   --bg-main: #0f172a;
   --bg-surface: #1e293b;
   --bg-card: #1e293b;
@@ -1393,152 +1430,6 @@ button:focus-visible {
   margin-right: 420px;
 }
 
-/* Fullcalendar overrides */
-:root,
-.fc,
-.fc-theme-standard,
-.fc-theme-standard .fc-scrollgrid {
-  --fc-page-bg-color: var(--bg-main) !important;
-  --fc-neutral-bg-color: var(--bg-surface) !important;
-  --fc-neutral-text-color: var(--text-secondary) !important;
-  --fc-border-color: var(--border-color) !important;
-  --fc-button-text-color: var(--text-primary) !important;
-  --fc-button-bg-color: var(--bg-surface) !important;
-  --fc-button-border-color: var(--border-color) !important;
-  --fc-button-hover-bg-color: var(--bg-input) !important;
-  --fc-button-hover-border-color: var(--border-color-light) !important;
-  --fc-button-active-bg-color: var(--bg-input) !important;
-  --fc-button-active-border-color: var(--color-blue) !important;
-  --fc-event-bg-color: var(--color-blue-glow) !important;
-  --fc-event-border-color: var(--color-indigo) !important;
-  --fc-event-text-color: #ffffff !important;
-  --fc-event-selected-overlay-color: rgba(0, 0, 0, 0.1) !important;
-  --fc-more-link-bg-color: var(--bg-surface) !important;
-  --fc-more-link-text-color: inherit !important;
-  --fc-theme-standard-border-color: var(--border-color) !important;
-  --fc-non-business-color: var(--bg-input) !important;
-  --fc-bg-event-color: rgba(59, 130, 246, 0.2) !important;
-  --fc-bg-event-opacity: 0.3 !important;
-  --fc-highlight-color: rgba(59, 130, 246, 0.1) !important;
-  --fc-today-bg-color: rgba(59, 130, 246, 0.05) !important;
-  --fc-now-indicator-color: #ef4444 !important;
-  --fc-list-event-hover-bg-color: var(--bg-input) !important;
-}
-
-.fc,
-.fc-theme-standard {
-  background-color: var(--bg-main) !important;
-  color: var(--text-primary) !important;
-}
-
-/* Hyper-Aggressive Overrides for stray bright elements */
-.fc *,
-.fc-theme-standard * {
-  border-color: rgba(255, 255, 255, 0.1) !important;
-}
-.fc-view,
-.fc-scrollgrid,
-.fc-scroller,
-.fc-daygrid-day,
-.fc-timegrid-col,
-.fc-timegrid-slot,
-.fc-col-header-cell,
-.fc-scrollgrid-sync-table,
-.fc-timegrid-body,
-.fc-scrollgrid-section > td,
-.fc-scrollgrid-section > th {
-  background-color: var(--bg-main) !important;
-}
-.fc-timegrid-col.fc-day-today {
-  background-color: rgba(59, 130, 246, 0.05) !important;
-}
-.fc-timegrid-slot-lane {
-  border-bottom-color: rgba(255, 255, 255, 0.05) !important;
-}
-.fc .fc-list-empty {
-  background-color: var(--bg-main) !important;
-  color: var(--text-secondary) !important;
-}
-
-/* Structural Overrides */
-.fc .fc-toolbar-title {
-  font-size: 1.5rem !important;
-  font-weight: 700;
-  color: var(--text-primary) !important;
-}
-.fc .fc-button-primary {
-  background-color: var(--bg-surface) !important;
-  color: var(--text-primary) !important;
-  border: 1px solid var(--border-color) !important;
-  text-transform: capitalize;
-  font-weight: 500;
-  border-radius: 8px !important;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  padding: 8px 16px !important;
-}
-.fc .fc-button-primary:not(:disabled):hover {
-  background-color: var(--bg-input) !important;
-  border-color: var(--color-blue) !important;
-  color: var(--text-primary) !important;
-}
-.fc .fc-button-active {
-  background-color: var(--bg-input) !important;
-  color: var(--color-blue) !important;
-  border-color: var(--color-blue) !important;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1) !important;
-}
-.fc-theme-standard th {
-  padding: 12px 0;
-  background: var(--bg-surface) !important;
-  font-weight: 700;
-  color: var(--text-primary) !important;
-}
-
-.fc-col-header-cell {
-  border-bottom: 2px solid var(--color-indigo) !important;
-}
-
-.fc-col-header-cell-cushion {
-  color: var(--text-primary) !important;
-  text-decoration: none !important;
-}
-.fc-event {
-  border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: none !important;
-  cursor: pointer;
-  transition:
-    transform 0.15s,
-    box-shadow 0.15s;
-  padding: 2px 4px;
-}
-.fc-event:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-  z-index: 5 !important;
-}
-
-/* Day/Time Grid Specific overrides */
-.fc-timegrid-slot-label-cushion,
-.fc-timegrid-axis-cushion {
-  color: var(--text-secondary) !important;
-}
-.fc-day-today {
-  background-color: rgba(59, 130, 246, 0.05) !important;
-}
-.fc-list-day-cushion {
-  background-color: var(--bg-surface) !important;
-  color: var(--text-primary) !important;
-}
-.fc-list-event-title,
-.fc-list-event-time {
-  color: var(--text-primary) !important;
-}
-.fc-list-event:hover td {
-  background-color: rgba(255, 255, 255, 0.05) !important;
-}
-
 /* Sidebar (BEM Refactored) */
 .lecturer-plan__sidebar {
   width: 420px;
@@ -2364,153 +2255,6 @@ button:focus-visible {
   transform: scale(0.92);
 }
 
-/* LOGIN PANEL (BEM Refactored) */
-.login-panel {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  min-height: 100dvh;
-  background-color: var(--bg-main);
-  padding: max(var(--spacing-lg), env(safe-area-inset-top)) var(--spacing-lg) max(var(--spacing-lg), env(safe-area-inset-bottom));
-  position: relative;
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  scroll-padding-block: max(var(--spacing-lg), env(safe-area-inset-top)) max(12rem, env(safe-area-inset-bottom));
-}
-
-.login-panel__theme-toggle {
-  position: absolute;
-  top: 32px;
-  right: 32px;
-}
-
-.login-panel__form {
-  background: var(--bg-surface);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  color: var(--text-primary);
-  padding: 48px;
-  border-radius: var(--radius-xl);
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  box-sizing: border-box;
-  width: 100%;
-  max-width: 420px;
-  border: 1px solid var(--border-color);
-}
-
-.login-panel__header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 32px;
-  text-align: center;
-}
-
-.login-panel__logo {
-  height: 52px;
-  width: auto;
-  max-width: 100%;
-  object-fit: contain;
-  /* subtle shadow to help logo visibility in both themes */
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
-}
-
-.login-panel__input-group-wrapper {
-  width: 100%;
-  margin-bottom: 24px;
-}
-
-.login-panel__input-group {
-  position: relative;
-  margin-bottom: 16px;
-  width: 100%;
-}
-
-.login-panel__icon {
-  position: absolute;
-  left: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  font-size: 16px;
-  z-index: 10;
-}
-
-.login-panel__input {
-  width: 100%;
-  padding: 12px 16px 12px 48px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  font-size: 16px;
-  box-sizing: border-box;
-  background-color: var(--bg-input);
-  color: var(--text-primary);
-  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
-}
-
-.login-panel__input:focus {
-  outline: none;
-  border-color: var(--color-indigo);
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
-  background-color: var(--bg-input-focus);
-}
-
-.login-panel__btn {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, var(--color-indigo) 0%, var(--color-blue) 100%);
-  border: none;
-  border-radius: var(--radius-md);
-  color: white;
-  font-weight: 700;
-  cursor: pointer;
-  font-size: 16px;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
-}
-
-.login-panel__btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
-  filter: brightness(1.1);
-}
-
-.login-panel__btn:active {
-  transform: translateY(0);
-}
-
-@media (max-width: 768px) {
-  .login-panel--editing {
-    align-items: flex-start;
-    padding-top: max(var(--spacing-md), env(safe-area-inset-top));
-  }
-}
-
-@media (max-width: 480px) {
-  .login-panel {
-    padding-left: var(--spacing-md);
-    padding-right: var(--spacing-md);
-  }
-
-  .login-panel__theme-toggle {
-    top: 16px;
-    right: 16px;
-  }
-
-  .login-panel__form {
-    padding: 24px;
-    border: none;
-    box-shadow: none;
-    background: transparent;
-  }
-}
 * {
     margin: 0;
     padding: 0;
@@ -2632,148 +2376,13 @@ button:focus-visible {
     transform: translateY(0);
 }
 
-.fc {
-    margin-top: 0;
-    max-width: 98%;
-    width: 100%;
-    margin-left: auto;
-    margin-right: auto;
-    padding: 0 2.5rem;
-    box-sizing: border-box;
-    background-color: var(--bg-main); /* Ensure the whole calendar inherits theme bg */
-    color: var(--text-primary);
-}
-
-.fc-view-harness {
-    background-color: var(--bg-surface) !important;
-    border-radius: 12px;
-    padding: 0;
-    width: 100%;
-    box-sizing: border-box;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    max-height: 700px;
-    overflow-y: auto;
-}
-
-.fc-view-harness::-webkit-scrollbar {
-    width: 10px;
-}
-
-.fc-view-harness::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 10px;
-}
-
-.fc-view-harness::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1;
-    border-radius: 10px;
-    border: 2px solid #f1f1f1;
-}
-
-.fc-view-harness::-webkit-scrollbar-thumb:hover {
-    background-color: #94a3b8;
-}
-
-.fc-toolbar {
-    background-color: transparent !important;
-    padding: 1rem 0 !important;
-    max-width: 100% !important;
-    width: 100% !important;
-    margin: 0 auto !important;
-    display: flex !important;
-    align-items: center !important;
-    gap: 1rem !important;
-    box-sizing: border-box !important;
-}
-
-.fc-toolbar-chunk {
-    display: flex !important;
-    align-items: center !important;
-    gap: 0.5rem !important;
-}
-
-.fc-toolbar-chunk:first-child {
-    flex: 0 0 auto !important;
-}
-
-.fc-toolbar-chunk:last-child {
-    flex: 0 0 auto !important;
-    margin-left: auto !important;
-    gap: 0.5rem !important;
-}
-
 /* Odstępy między przyciskami Dzień – Tydzień – Miesiąc */
-.fc-timeGridWeek-button,
-.fc-dayGridMonth-button {
-    margin-left: 10px !important;
-}
-
-.fc-toolbar-title {
-    font-size: 1.5rem !important;
-    color: var(--text-primary) !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.3px;
-}
-
-.fc-button {
-    font-size: 0.95rem !important;
-    padding: 0.5rem 1rem !important;
-    border-radius: 6px !important;
-    transition: all 0.2s ease !important;
-    font-weight: 500 !important;
-}
-
-.fc-button:hover {
-    transform: translateY(-1px) !important;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
-    background-color: var(--bg-main) !important;
-}
-
-.fc-popover {
-  background-color: var(--bg-main) !important;
-  border: 1px solid var(--border-color) !important;
-}
-
-.fc-popover-header {
-  background-color: var(--bg-main) !important;
-}
-
-.fc-button-primary {
-    background-color: var(--color-blue) !important;
-    border-color: var(--color-blue) !important;
-    color: white !important;
-}
-
-.fc-button-primary:hover {
-    background-color: var(--color-blue-glow) !important;
-    border-color: var(--color-blue-glow) !important;
-    transform: translateY(-1px);
-}
-
-.fc-daygrid-day-number {
-    color: var(--text-primary);
-}
-
-.fc-timegrid-slot-label-cushion {
-    color: var(--text-secondary);
-}
 
 /* Nagłówki kolumn (pon. 2.02, wt. 3.02, …) – czarna czcionka */
-.fc-col-header-cell,
-.fc-col-header-cell-cushion,
-.fc-col-header-cell a,
-.fc-day-header {
-    color: var(--text-primary) !important;
-    background-color: var(--bg-surface) !important;
-}
 
 .tippy-box[data-theme~='custom-yellow'] {
     background-color: rgb(229, 255, 35);
     color: black;
-}
-
-.fc-list {
-    color: #000;
 }
 
 /* Sidebar */
@@ -2987,10 +2596,6 @@ button.sidebarChatButton:active {
 
     .sidebarChatInput {
         margin-left: 0px;
-    }
-
-    .fc {
-        margin-top: 30%;
     }
 }
 
@@ -3225,37 +2830,6 @@ button.sidebarChatButton:active {
         font-size: 14px;
     }
 
-    .fc {
-        margin-top: 0;
-    }
-
-    .fc-list-empty {
-        font-size: 1.5rem;
-    }
-
-    .fc-toolbar {
-        display: flex;
-        flex-direction: column;
-        /* Ustawienie kierunku flex na kolumnę */
-        align-items: center;
-        /* Wyśrodkowanie elementów */
-    }
-
-    .fc-toolbar .fc-toolbar-chunk {
-        display: flex;
-        justify-content: center;
-        width: 100%;
-    }
-
-    .fc-toolbar-title {
-        order: 0;
-        /* Ustawienie kolejności tytułu */
-        font-size: 1.5rem !important;
-        color: rgb(68, 68, 68);
-        margin-bottom: 10px;
-        /* Dodanie marginesu dolnego */
-    }
-
     .plan-header-info {
         flex-direction: column;
         gap: 1.5rem;
@@ -3272,27 +2846,6 @@ button.sidebarChatButton:active {
     .plan-logo-stack {
         align-items: center;
         min-width: auto;
-    }
-
-    .fc {
-        max-width: 98%;
-        padding: 0 1rem;
-    }
-
-    .fc-toolbar {
-        padding: 0.75rem 0 !important;
-        max-width: 100% !important;
-        flex-direction: column !important;
-        gap: 0.75rem !important;
-    }
-
-    .fc-toolbar-chunk {
-        width: 100% !important;
-        justify-content: center !important;
-    }
-
-    .fc-toolbar-chunk:last-child {
-        margin-left: 0 !important;
     }
 }
 

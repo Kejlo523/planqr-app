@@ -1,0 +1,85 @@
+.admin-console .workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .55rem clamp(.8rem, 2vw, 1.65rem);
+  border-top: 3px solid var(--pq-accent);
+  background: var(--pq-surface);
+}
+
+.workspace-header__location, .workspace-brand, .workspace-header__back {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-width: 0;
+}
+
+.workspace-header__location { gap: .9rem; }
+
+.workspace-brand {
+  font-family: var(--pq-heading);
+  color: var(--pq-ink);
+  font-size: 1.65rem;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -.035em;
+}
+
+.workspace-brand img {
+  width: 1.95rem;
+  height: 1.95rem;
+  object-fit: contain;
+  background: #fff;
+  padding: .2rem;
+  border: 1px solid var(--pq-line);
+  border-radius: 5px;
+  flex: none;
+}
+
+.workspace-header__back, .workspace-header__title {
+  border-left: 1px solid var(--pq-line);
+  padding-left: .9rem;
+  font-size: .84rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.workspace-header__back { color: var(--pq-accent-text); }
+.workspace-header__back:hover { color: var(--pq-ink); }
+.workspace-header__back svg { flex: none; }
+.workspace-header__title { color: var(--pq-muted); }
+
+.workspace-header .theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid var(--pq-line);
+  border-radius: 6px;
+  background: var(--pq-surface);
+  color: var(--pq-ink);
+  cursor: pointer;
+  font-size: 1rem;
+  box-shadow: none;
+  transition: none;
+}
+.workspace-header .theme-toggle:hover {
+  background: var(--pq-raised);
+  transform: none;
+}
+.workspace-header :focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 3px; }
+
+@media (max-width: 720px) {
+  .workspace-header__location { gap: .65rem; }
+  .workspace-header__back, .workspace-header__title { padding-left: .65rem; }
+  .workspace-header__back + .workspace-header__title { display: none; }
+  .workspace-header .theme-toggle { width: 2.5rem; height: 2.5rem; }
+  .workspace-brand { font-size: 1.45rem; }
+}
+
+@media (max-width: 480px) {
+  .workspace-header__title,
+  .workspace-header__back span { display: none; }
+}

@@ -1,0 +1,3013 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import logo from "../../../assets/zut_fav.png";
+import {
+  canOpenLecturerPlan,
+  fetchSession,
+  logout,
+  type SessionInfo,
+} from "../../services/authService";
+import "./AdminRegistry.css";
+import { useTheme } from "../../../context/ThemeContext";
+import AdminPairingScanner from "./adminPanel/AdminPairingScanner";
+import AdminPanelSidebar from "./adminPanel/AdminPanelSidebar";
+import AdminPanelThemeToggle from "./adminPanel/AdminPanelThemeToggle";
+import AdminsView from "./adminPanel/AdminsView";
+import DeviceDrawer from "./adminPanel/DeviceDrawer";
+import DevicesView from "./adminPanel/DevicesView";
+import PendingTabletsView from "./adminPanel/PendingTabletsView";
+import PriorityMessagesView from "./adminPanel/PriorityMessagesView";
+import ScheduleView from "./adminPanel/ScheduleView";
+import TabletPreviewView from "./adminPanel/TabletPreviewView";
+import {
+  adminViewMeta,
+  defaultDeviceSortState,
+  defaultNightModeSettings,
+  defaultPriorityMessage,
+  formatPairingDeviceId,
+  formatPairingDeviceInput,
+  getDeviceDisplayName,
+  getNextDeviceSortState,
+  hasDeviceDisplayProfile,
+  normalizeRoomValue,
+  ROOM_SEARCH_DEBOUNCE_MS,
+  ROOM_SEARCH_MIN_LENGTH,
+  sanitizePairingDeviceId,
+  sanitizeRoomValue,
+  sortDevices,
+} from "./adminPanel/helpers";
+import type {
+    AdminPanelView,
+    AdminRecord,
+    Device,
+    DeviceSortState,
+    NightModeSettings,
+    PriorityMessagePreset,
+    PriorityMessagePresetPayload,
+    PriorityMessageSchedule,
+    PriorityMessageScheduleCollision,
+    PriorityMessageSchedulePayload,
+    PriorityMessageTemplate,
+    Tone,
+  } from "./adminPanel/types";
+
+const TOAST_DURATION_MS = 5000;
+const ADMIN_SCROLL_ROOT_CLASS = "admin-console-scroll-root";
+const MOBILE_BREAKPOINT_PX = 720;
+const SCROLL_TOP_VISIBILITY_THRESHOLD_PX = 160;
+const SCROLL_TOP_TOAST_GAP_PX = 12;
+
+type AdminNavigationKey = AdminPanelView | "pairing" | "lecturer-preview";
+
+interface NavigationItem {
+  key: AdminNavigationKey;
+  label: string;
+  icon: string;
+  active: boolean;
+}
+
+interface AdminToast {
+  id: number;
+  message: string;
+  tone: Tone;
+}
+
+interface PreviewModalState {
+  deviceId: number;
+  phase: "loading-profile" | "ready" | "error";
+  message: string | null;
+  requestedAt: number | null;
+}
+
+const ADMIN_NAVIGATION_ORDER: AdminNavigationKey[] = [
+  "devices",
+  "pending-tablets",
+  "admins",
+  "schedule",
+  "pairing",
+  "lecturer-preview",
+  "tablet-preview",
+  "priority-gallery",
+];
+
+const PAIRING_MESSAGE = {
+  staleDevice: "Tablet już sparowany.",
+  codeInvalid: "Błędny kod.",
+  codeNotFound: "Nie znaleziono.",
+  lookupError: "Błąd wyszukiwania.",
+  lookupConnectionError: "Błąd połączenia.",
+  found: "Tablet znaleziony.",
+  roomRequired: "Wpisz salę.",
+  roomInvalid: "Sala nie istnieje.",
+  assignError: "Nie zapisano zmian.",
+  assigned: "Tablet przypisany.",
+} as const;
+
+const getActiveView = (value: string | null): AdminPanelView => {
+  if (
+    value === "admins" ||
+    value === "schedule" ||
+    value === "tablet-preview" ||
+    value === "priority-gallery" ||
+    value === "pending-tablets"
+  ) {
+    return value;
+  }
+
+  return "devices";
+};
+
+const getPreviewDeviceId = (value: string | null) => {
+  const parsedValue = Number(value);
+  return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : null;
+};
+
+const readFileAsBase64 = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      resolve(result.replace(/^data:[^;]+;base64,/, ""));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Nie udało się odczytać pliku."));
+    reader.readAsDataURL(file);
+  });
+
+
+
+const normalizeDeviceRecord = (device: Device): Device => ({
+  ...device,
+  priorityMessage: device.priorityMessage ?? defaultPriorityMessage,
+});
+
+const AdminRegistry = () => {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentView = getActiveView(searchParams.get("view"));
+  const previewDeviceId = getPreviewDeviceId(searchParams.get("deviceId"));
+
+  const { theme: adminTheme, setTheme: setAdminTheme } = useTheme();
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [admins, setAdmins] = useState<AdminRecord[]>([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [adminMutationLoading, setAdminMutationLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [pendingSearchTerm, setPendingSearchTerm] = useState("");
+  const [deviceSort, setDeviceSort] = useState<DeviceSortState>(defaultDeviceSortState);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<number[]>([]);
+  const [visibleDeviceIds, setVisibleDeviceIds] = useState<number[]>([]);
+  const [batchMutationLoading, setBatchMutationLoading] = useState(false);
+  const [batchThemeValue, setBatchThemeValue] = useState<Device["displayTheme"]>("dark");
+  const [batchThemeLoading, setBatchThemeLoading] = useState(false);
+  const [batchBlackScreenValue, setBatchBlackScreenValue] =
+    useState<Device["blackScreenMode"]>("follow");
+  const [batchBlackScreenLoading, setBatchBlackScreenLoading] = useState(false);
+  const [themeMutationDeviceId, setThemeMutationDeviceId] = useState<number | null>(null);
+  const [blackScreenMutationDeviceId, setBlackScreenMutationDeviceId] = useState<number | null>(
+    null,
+  );
+  const [newAdminUsername, setNewAdminUsername] = useState("");
+  const [adminFeedback, setAdminFeedback] = useState<string | null>(null);
+  const [adminFeedbackTone, setAdminFeedbackTone] = useState<Tone>("neutral");
+  const [reloadingTablets, setReloadingTablets] = useState(false);
+  const [nightModeSettings, setNightModeSettings] =
+    useState<NightModeSettings>(defaultNightModeSettings);
+  const [nightModeLoading, setNightModeLoading] = useState(false);
+  const [nightModeSaving, setNightModeSaving] = useState(false);
+  const [nightModeFeedback, setNightModeFeedback] = useState<string | null>(null);
+  const [nightModeFeedbackTone, setNightModeFeedbackTone] =
+    useState<Tone>("neutral");
+  const [priorityMessageTemplates, setPriorityMessageTemplates] = useState<
+    PriorityMessageTemplate[]
+  >([]);
+  const [priorityMessagesLoading, setPriorityMessagesLoading] = useState(false);
+  const [batchPriorityMessageTemplateId, setBatchPriorityMessageTemplateId] = useState("");
+  const [batchPriorityMessageLoading, setBatchPriorityMessageLoading] = useState(false);
+  const [batchPriorityMessageClearLoading, setBatchPriorityMessageClearLoading] =
+    useState(false);
+  const [priorityMessageCreating, setPriorityMessageCreating] = useState(false);
+  const [priorityMessageUploading, setPriorityMessageUploading] = useState(false);
+  const [priorityMessageMutatingTemplateId, setPriorityMessageMutatingTemplateId] =
+    useState<string | null>(null);
+  const [priorityMessageSchedules, setPriorityMessageSchedules] = useState<
+    PriorityMessageSchedule[]
+  >([]);
+  const [priorityMessageSchedulesLoading, setPriorityMessageSchedulesLoading] =
+    useState(false);
+  const [priorityMessageScheduleSaving, setPriorityMessageScheduleSaving] =
+    useState(false);
+  const [priorityMessageScheduleMutationId, setPriorityMessageScheduleMutationId] =
+    useState<string | null>(null);
+  const [priorityMessagePresets, setPriorityMessagePresets] = useState<
+    PriorityMessagePreset[]
+  >([]);
+  const [priorityMessagePresetsLoading, setPriorityMessagePresetsLoading] =
+    useState(false);
+  const [priorityMessagePresetMutationId, setPriorityMessagePresetMutationId] =
+    useState<string | null>(null);
+  const [banIpDeviceId, setBanIpDeviceId] = useState<number | null>(null);
+
+  const [drawerDeviceId, setDrawerDeviceId] = useState<number | null>(null);
+  const [previewState, setPreviewState] = useState<PreviewModalState | null>(null);
+  const [formClassroom, setFormClassroom] = useState("");
+  const [roomError, setRoomError] = useState("");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState("");
+  const [pairingDeviceId, setPairingDeviceId] = useState<number | null>(null);
+  const [pairingRoom, setPairingRoom] = useState("");
+  const [pairingRoomSuggestions, setPairingRoomSuggestions] = useState<string[]>([]);
+  const [pairingShowRoomSuggestions, setPairingShowRoomSuggestions] = useState(false);
+  const [pairingSelectedSuggestion, setPairingSelectedSuggestion] = useState<string | null>(null);
+  const [pairingSearchingRooms, setPairingSearchingRooms] = useState(false);
+  const [pairingLookingUp, setPairingLookingUp] = useState(false);
+  const [pairingAssigning, setPairingAssigning] = useState(false);
+  const [pairingCodeTone, setPairingCodeTone] = useState<Tone>("neutral");
+  const [pairingRoomTone, setPairingRoomTone] = useState<Tone>("neutral");
+  const [toasts, setToasts] = useState<AdminToast[]>([]);
+  const [isPairingScannerOpen, setPairingScannerOpen] = useState(false);
+  const [pairingReturnMode, setPairingReturnMode] =
+    useState<"none" | "after-save">("none");
+  const [isMobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isMobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [isScrollTopVisible, setScrollTopVisible] = useState(false);
+  const [toastStackOffset, setToastStackOffset] = useState(0);
+
+  const roomSearchAbortRef = useRef<AbortController | null>(null);
+  const roomSearchRequestIdRef = useRef(0);
+  const pairingRoomSearchAbortRef = useRef<AbortController | null>(null);
+  const pairingRoomSearchRequestIdRef = useRef(0);
+  const roomSearchCacheRef = useRef(new Map<string, string[]>());
+  const knownRoomsRef = useRef(new Set<string>());
+  const pendingDeviceIdsRef = useRef<Set<string>>(new Set());
+  const hasFetchedDevicesRef = useRef(false);
+  const toastIdRef = useRef(0);
+  const toastTimeoutRef = useRef(new Map<number, number>());
+  const toastStackRef = useRef<HTMLDivElement | null>(null);
+
+  const drawerDevice = useMemo(
+    () =>
+      drawerDeviceId === null
+        ? null
+        : devices.find((device) => device.id === drawerDeviceId) ?? null,
+    [devices, drawerDeviceId],
+  );
+
+  const previewDevice = useMemo(
+    () =>
+      previewDeviceId === null
+        ? null
+        : devices.find((device) => device.id === previewDeviceId && device.status === "ACTIVE") ??
+          null,
+    [devices, previewDeviceId],
+  );
+  const pairingDevice = useMemo(
+    () =>
+      pairingDeviceId === null
+        ? null
+        : devices.find((device) => device.id === pairingDeviceId && device.status === "PENDING") ??
+          null,
+    [devices, pairingDeviceId],
+  );
+  const pairingSuggestions = useMemo(() => {
+    const normalizedCode = sanitizePairingDeviceId(pairingCode);
+
+    if (!normalizedCode || pairingDevice !== null) {
+      return [];
+    }
+
+    return devices
+      .filter(
+        (device) => device.status === "PENDING" && device.deviceId.startsWith(normalizedCode),
+      )
+      .sort(
+        (left, right) =>
+          new Date(right.lastSeen).getTime() - new Date(left.lastSeen).getTime(),
+      )
+      .slice(0, 5);
+  }, [devices, pairingCode, pairingDevice]);
+  const allPendingDevices = devices.filter((device) => device.status === "PENDING");
+  const pairedDevices = devices.filter((device) => device.status === "ACTIVE");
+  const activeDevices = sortDevices(pairedDevices, deviceSort);
+  const selectedDeviceIdSet = useMemo(() => new Set(selectedDeviceIds), [selectedDeviceIds]);
+  const visibleDeviceIdSet = useMemo(() => new Set(visibleDeviceIds), [visibleDeviceIds]);
+  const selectedVisibleDevices = useMemo(
+    () =>
+      pairedDevices.filter(
+        (device) => selectedDeviceIdSet.has(device.id) && visibleDeviceIdSet.has(device.id),
+      ),
+    [pairedDevices, selectedDeviceIdSet, visibleDeviceIdSet],
+  );
+  const onlineDevicesCount = pairedDevices.filter(
+    (device) => device.connectionStatus === "ONLINE",
+  ).length;
+  const offlineDevicesCount = pairedDevices.filter(
+    (device) => device.connectionStatus === "OFFLINE",
+  ).length;
+  const lecturerPanelHref = canOpenLecturerPlan(session) ? "/lecturerPlan" : null;
+
+
+
+  useEffect(() => {
+    if (activeDevices.length > 0) {
+      return;
+    }
+
+    setVisibleDeviceIds((current) => (current.length === 0 ? current : []));
+  }, [activeDevices.length]);
+
+  useEffect(() => {
+    document.documentElement.classList.add(ADMIN_SCROLL_ROOT_CLASS);
+    document.body.classList.add(ADMIN_SCROLL_ROOT_CLASS);
+
+    return () => {
+      document.documentElement.classList.remove(ADMIN_SCROLL_ROOT_CLASS);
+      document.body.classList.remove(ADMIN_SCROLL_ROOT_CLASS);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (drawerDeviceId !== null && !drawerDevice) {
+      setDrawerDeviceId(null);
+    }
+  }, [drawerDevice, drawerDeviceId]);
+
+  useEffect(() => {
+    if (previewState !== null && !previewDevice) {
+      setPreviewState(null);
+    }
+  }, [previewDevice, previewState]);
+
+  useEffect(() => {
+    if (!isMobileNavOpen && !isMobileSettingsOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+        setMobileSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMobileNavOpen, isMobileSettingsOpen]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > MOBILE_BREAKPOINT_PX) {
+        setMobileNavOpen(false);
+        setMobileSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    const query = sanitizeRoomValue(formClassroom);
+
+    if (!showSuggestions) {
+      roomSearchAbortRef.current?.abort();
+      roomSearchAbortRef.current = null;
+      roomSearchRequestIdRef.current += 1;
+      setIsSearching(false);
+      return;
+    }
+
+    if (query.length < ROOM_SEARCH_MIN_LENGTH) {
+      roomSearchAbortRef.current?.abort();
+      roomSearchAbortRef.current = null;
+      roomSearchRequestIdRef.current += 1;
+      setSuggestions([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      roomSearchAbortRef.current?.abort();
+      const controller = new AbortController();
+      roomSearchAbortRef.current = controller;
+      const requestId = roomSearchRequestIdRef.current + 1;
+      roomSearchRequestIdRef.current = requestId;
+
+      setIsSearching(true);
+
+      void fetchRoomMatches(query, controller.signal)
+        .then((rooms) => {
+          if (!controller.signal.aborted && requestId === roomSearchRequestIdRef.current) {
+            setSuggestions(rooms);
+          }
+        })
+        .catch((error) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            console.error("Error searching rooms:", error);
+          }
+
+          if (requestId === roomSearchRequestIdRef.current) {
+            setSuggestions([]);
+          }
+        })
+        .finally(() => {
+          if (requestId === roomSearchRequestIdRef.current) {
+            setIsSearching(false);
+          }
+        });
+    }, ROOM_SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [formClassroom, showSuggestions]);
+
+  useEffect(() => {
+    const query = sanitizeRoomValue(pairingRoom);
+
+    if (!pairingShowRoomSuggestions) {
+      pairingRoomSearchAbortRef.current?.abort();
+      pairingRoomSearchAbortRef.current = null;
+      pairingRoomSearchRequestIdRef.current += 1;
+      setPairingSearchingRooms(false);
+      return;
+    }
+
+    if (query.length < ROOM_SEARCH_MIN_LENGTH) {
+      pairingRoomSearchAbortRef.current?.abort();
+      pairingRoomSearchAbortRef.current = null;
+      pairingRoomSearchRequestIdRef.current += 1;
+      setPairingRoomSuggestions([]);
+      setPairingSearchingRooms(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      pairingRoomSearchAbortRef.current?.abort();
+      const controller = new AbortController();
+      pairingRoomSearchAbortRef.current = controller;
+      const requestId = pairingRoomSearchRequestIdRef.current + 1;
+      pairingRoomSearchRequestIdRef.current = requestId;
+
+      setPairingSearchingRooms(true);
+
+      void fetchRoomMatches(query, controller.signal)
+        .then((rooms) => {
+          if (
+            !controller.signal.aborted &&
+            requestId === pairingRoomSearchRequestIdRef.current
+          ) {
+            setPairingRoomSuggestions(rooms);
+          }
+        })
+        .catch((error) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) {
+            console.error("Error searching pairing rooms:", error);
+          }
+
+          if (requestId === pairingRoomSearchRequestIdRef.current) {
+            setPairingRoomSuggestions([]);
+          }
+        })
+        .finally(() => {
+          if (requestId === pairingRoomSearchRequestIdRef.current) {
+            setPairingSearchingRooms(false);
+          }
+        });
+    }, ROOM_SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [pairingRoom, pairingShowRoomSuggestions]);
+
+  useEffect(() => {
+    const toastTimeouts = toastTimeoutRef.current;
+
+    return () => {
+      roomSearchAbortRef.current?.abort();
+      pairingRoomSearchAbortRef.current?.abort();
+      for (const timeoutId of toastTimeouts.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      toastTimeouts.clear();
+    };
+  }, []);
+
+  const dismissToast = useCallback((toastId: number) => {
+    const timeoutId = toastTimeoutRef.current.get(toastId);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      toastTimeoutRef.current.delete(toastId);
+    }
+
+    setToasts((current) => current.filter((toast) => toast.id !== toastId));
+  }, []);
+
+  const pushToast = useCallback((
+    message: string,
+    tone: Tone = "neutral",
+    duration = TOAST_DURATION_MS,
+  ) => {
+    const nextToastId = toastIdRef.current + 1;
+    toastIdRef.current = nextToastId;
+
+    setToasts((current) => [...current, { id: nextToastId, message, tone }]);
+
+    const timeoutId = window.setTimeout(() => {
+      dismissToast(nextToastId);
+    }, duration);
+
+    toastTimeoutRef.current.set(nextToastId, timeoutId);
+  }, [dismissToast]);
+
+  useEffect(() => {
+    if (pairingDeviceId === null || pairingDevice !== null) {
+      return;
+    }
+
+    pairingRoomSearchAbortRef.current?.abort();
+    pairingRoomSearchAbortRef.current = null;
+    pairingRoomSearchRequestIdRef.current += 1;
+    setPairingDeviceId(null);
+    setPairingRoom("");
+    setPairingRoomSuggestions([]);
+    setPairingShowRoomSuggestions(false);
+    setPairingSelectedSuggestion(null);
+    setPairingSearchingRooms(false);
+    setPairingCodeTone("danger");
+    setPairingRoomTone("neutral");
+    pushToast(PAIRING_MESSAGE.staleDevice, "warning");
+  }, [pairingDevice, pairingDeviceId, pushToast]);
+
+  const resetRoomSearch = () => {
+    roomSearchAbortRef.current?.abort();
+    roomSearchAbortRef.current = null;
+    roomSearchRequestIdRef.current += 1;
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setIsSearching(false);
+    setSelectedSuggestion(null);
+    setRoomError("");
+  };
+
+  const resetPairingRoomSearch = () => {
+    pairingRoomSearchAbortRef.current?.abort();
+    pairingRoomSearchAbortRef.current = null;
+    pairingRoomSearchRequestIdRef.current += 1;
+    setPairingShowRoomSuggestions(false);
+    setPairingRoomSuggestions([]);
+    setPairingSearchingRooms(false);
+    setPairingSelectedSuggestion(null);
+  };
+
+  const resetPairingSelection = (options?: { keepCode?: boolean }) => {
+    resetPairingRoomSearch();
+    setPairingDeviceId(null);
+    setPairingRoom("");
+    setPairingCodeTone("neutral");
+    setPairingRoomTone("neutral");
+
+    if (!options?.keepCode) {
+      setPairingCode("");
+    }
+  };
+
+  const closeDrawer = () => {
+    resetRoomSearch();
+    setDrawerDeviceId(null);
+    setFormClassroom("");
+  };
+
+  const handleDrawerClose = () => {
+    setPairingReturnMode("none");
+    closeDrawer();
+  };
+
+  const setTabletPreviewSearchParams = useCallback(
+    (deviceId?: number | null) => {
+      if (!deviceId) {
+        setSearchParams({ view: "tablet-preview" });
+        return;
+      }
+
+      setSearchParams({
+        view: "tablet-preview",
+        deviceId: String(deviceId),
+      });
+    },
+    [setSearchParams],
+  );
+
+  const openTabletPreviewView = (deviceId?: number | null) => {
+    closeMobilePanels();
+    closeDrawer();
+    setTabletPreviewSearchParams(deviceId);
+  };
+
+  const closeMobilePanels = () => {
+    setMobileNavOpen(false);
+    setMobileSettingsOpen(false);
+  };
+
+  const toggleMobileNav = () => {
+    setMobileSettingsOpen(false);
+    setMobileNavOpen((current) => !current);
+  };
+
+  const toggleMobileSettings = () => {
+    setMobileNavOpen(false);
+    setMobileSettingsOpen((current) => !current);
+  };
+
+  const fetchRoomMatches = async (query: string, signal?: AbortSignal) => {
+    const sanitizedQuery = sanitizeRoomValue(query);
+    const cacheKey = normalizeRoomValue(sanitizedQuery);
+
+    if (!sanitizedQuery) {
+      return [];
+    }
+
+    const cachedRooms = roomSearchCacheRef.current.get(cacheKey);
+    if (cachedRooms) {
+      return cachedRooms;
+    }
+
+    const response = await fetch(
+      `/schedule.php?kind=room&query=${encodeURIComponent(sanitizedQuery)}`,
+      { signal },
+    );
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    const rooms = Array.isArray(data)
+      ? Array.from(
+          new Set(
+            data
+              .filter((item: { item?: unknown }) => typeof item?.item === "string")
+              .map((item: { item: string }) => sanitizeRoomValue(item.item))
+              .filter(Boolean),
+          ),
+        )
+      : [];
+
+    roomSearchCacheRef.current.set(cacheKey, rooms);
+    rooms.forEach((room) => knownRoomsRef.current.add(normalizeRoomValue(room)));
+
+    return rooms;
+  };
+
+  const fetchDevices = async (options?: {
+    silent?: boolean;
+    manual?: boolean;
+  }) => {
+    const silent = options?.silent ?? false;
+    const manual = options?.manual ?? false;
+
+    try {
+      if (!silent) {
+        setLoading(true);
+      }
+
+      if (manual) {
+        setManualRefreshing(true);
+      }
+
+      const response = await fetch("/api/devices");
+      if (response.ok) {
+        const data = ((await response.json()) as Device[]).map(normalizeDeviceRecord);
+        const nextPendingDevices = data.filter((device) => device.status === "PENDING");
+        const nextPendingIds = new Set(nextPendingDevices.map((device) => device.deviceId));
+
+        if (hasFetchedDevicesRef.current) {
+          const newPendingDevices = nextPendingDevices.filter(
+            (device) => !pendingDeviceIdsRef.current.has(device.deviceId),
+          );
+
+          if (newPendingDevices.length > 0) {
+            const message =
+              newPendingDevices.length === 1
+                ? `Nowy tablet czeka na sparowanie: ${formatPairingDeviceId(
+                    newPendingDevices[0].deviceId,
+                  )}.`
+                : `${newPendingDevices.length} nowe tablety czekają na sparowanie.`;
+            pushToast(message, "warning", 7000);
+          }
+        }
+
+        pendingDeviceIdsRef.current = nextPendingIds;
+        hasFetchedDevicesRef.current = true;
+        setDevices(data);
+        return data;
+      }
+    } catch (error) {
+      console.error("Error fetching devices:", error);
+      return null;
+    } finally {
+      if (!silent) {
+        setLoading(false);
+      }
+
+      if (manual) {
+        setManualRefreshing(false);
+      }
+    }
+
+    return null;
+  };
+
+  const applyPriorityMessageTemplateList = (
+    templates: PriorityMessageTemplate[],
+    preferredTemplateId?: string,
+  ) => {
+    setPriorityMessageTemplates(templates);
+    setBatchPriorityMessageTemplateId((current) => {
+      if (preferredTemplateId && templates.some((template) => template.id === preferredTemplateId)) {
+        return preferredTemplateId;
+      }
+
+      if (current && templates.some((template) => template.id === current)) {
+        return current;
+      }
+
+      return templates[0]?.id ?? "";
+    });
+  };
+
+  const fetchPriorityMessageTemplates = async () => {
+    try {
+      setPriorityMessagesLoading(true);
+      const response = await fetch("/api/devices/priority-messages", {
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error("Nie udało się pobrać komunikatów priorytetowych.");
+      }
+
+      const data = await response.json();
+      const templates = Array.isArray(data.templates)
+        ? (data.templates as PriorityMessageTemplate[])
+        : [];
+
+      applyPriorityMessageTemplateList(templates);
+    } catch (error) {
+      console.error("Error fetching priority message templates:", error);
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się pobrać komunikatów priorytetowych.",
+        "danger",
+      );
+    } finally {
+      setPriorityMessagesLoading(false);
+    }
+  };
+
+  const fetchPriorityMessageSchedules = async (options?: { silent?: boolean }) => {
+    try {
+      if (!options?.silent) {
+        setPriorityMessageSchedulesLoading(true);
+      }
+
+      const response = await fetch("/api/devices/priority-messages/schedules", {
+        credentials: "include",
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się pobrać harmonogramu komunikatów.");
+      }
+
+      setPriorityMessageSchedules(
+        Array.isArray(data.schedules)
+          ? (data.schedules as PriorityMessageSchedule[])
+          : [],
+      );
+    } catch (error) {
+      console.error("Error fetching priority message schedules:", error);
+      if (!options?.silent) {
+        pushToast(
+          error instanceof Error
+            ? error.message
+            : "Nie udało się pobrać harmonogramu komunikatów.",
+          "danger",
+        );
+      }
+    } finally {
+      if (!options?.silent) {
+        setPriorityMessageSchedulesLoading(false);
+      }
+    }
+  };
+
+  const fetchPriorityMessagePresets = async (options?: { silent?: boolean }) => {
+    try {
+      if (!options?.silent) {
+        setPriorityMessagePresetsLoading(true);
+      }
+
+      const response = await fetch("/api/devices/priority-messages/presets", {
+        credentials: "include",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się pobrać presetów komunikatów.");
+      }
+
+      setPriorityMessagePresets(
+        Array.isArray(data.presets) ? (data.presets as PriorityMessagePreset[]) : [],
+      );
+    } catch (error) {
+      console.error("Error fetching priority message presets:", error);
+      if (!options?.silent) {
+        pushToast(
+          error instanceof Error
+            ? error.message
+            : "Nie udało się pobrać presetów komunikatów.",
+          "danger",
+        );
+      }
+    } finally {
+      if (!options?.silent) {
+        setPriorityMessagePresetsLoading(false);
+      }
+    }
+  };
+
+  const openDevicePreview = async (
+    device: Device,
+    options?: { forceProfileRefresh?: boolean },
+  ) => {
+    if (device.status !== "ACTIVE" || !device.deviceClassroom || !device.deviceURL) {
+      setPreviewState({
+        deviceId: device.id,
+        phase: "error",
+        message: "Tablet nie ma kompletnej konfiguracji do podglądu.",
+        requestedAt: null,
+      });
+      return;
+    }
+
+    if (hasDeviceDisplayProfile(device) && !options?.forceProfileRefresh) {
+      setPreviewState({
+        deviceId: device.id,
+        phase: "ready",
+        message: null,
+        requestedAt: null,
+      });
+      return;
+    }
+
+    if (device.connectionStatus !== "ONLINE") {
+      setPreviewState({
+        deviceId: device.id,
+        phase: "error",
+        message:
+          "Tablet nie ma jeszcze zapisanego profilu ekranu i nie jest aktualnie online.",
+        requestedAt: null,
+      });
+      return;
+    }
+
+    setPreviewState({
+      deviceId: device.id,
+      phase: "loading-profile",
+      message: "Pobieranie parametrów ekranu z tabletu...",
+      requestedAt: Date.now(),
+    });
+
+    try {
+      const response = await fetch(`/api/devices/${device.id}/request-display-profile`, {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się pobrać profilu ekranu.");
+      }
+
+      if ((data.delivered ?? 0) < 1) {
+        setPreviewState((current) =>
+          current && current.deviceId === device.id
+            ? {
+                ...current,
+                phase: "error",
+                message: "Tablet nie odpowiedział na prośbę o przesłanie profilu ekranu.",
+                requestedAt: null,
+              }
+            : current,
+        );
+      }
+    } catch (error) {
+      setPreviewState((current) =>
+        current && current.deviceId === device.id
+          ? {
+              ...current,
+              phase: "error",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Nie udało się pobrać profilu ekranu z urządzenia.",
+              requestedAt: null,
+            }
+          : current,
+      );
+    }
+  };
+
+  const handleDeviceDisplaySettingsUpdate = async (
+    deviceId: number,
+    payload: Partial<Pick<Device, "displayTheme" | "blackScreenMode">>,
+  ) => {
+    const response = await fetch(`/api/devices/${deviceId}/display-settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || "Nie udało się zapisać ustawień tabletu.");
+    }
+
+    if (data.device) {
+      const nextDevice = normalizeDeviceRecord(data.device as Device);
+      setDevices((current) =>
+        current.map((device) => (device.id === nextDevice.id ? nextDevice : device)),
+      );
+    }
+
+    return data;
+  };
+
+  const handleDeviceThemeChange = async (
+    device: Device,
+    displayTheme: Device["displayTheme"],
+  ) => {
+    if (displayTheme === device.displayTheme) {
+      return;
+    }
+
+    try {
+      setThemeMutationDeviceId(device.id);
+      await handleDeviceDisplaySettingsUpdate(device.id, { displayTheme });
+      pushToast(
+        `Zmieniono motyw tabletu ${getDeviceDisplayName(device)} na ${
+          displayTheme === "light" ? "jasny" : "ciemny"
+        }.`,
+        "success",
+      );
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Nie udało się zmienić motywu tabletu.",
+        "danger",
+      );
+    } finally {
+      setThemeMutationDeviceId(null);
+    }
+  };
+
+  const handleDeviceBlackScreenModeChange = async (
+    device: Device,
+    blackScreenMode: Device["blackScreenMode"],
+  ) => {
+    if (blackScreenMode === device.blackScreenMode) {
+      return;
+    }
+
+    try {
+      setBlackScreenMutationDeviceId(device.id);
+      await handleDeviceDisplaySettingsUpdate(device.id, {
+        blackScreenMode,
+      });
+
+      const toastMessage =
+        blackScreenMode === "follow"
+          ? `Tablet ${getDeviceDisplayName(device)} wrócił do harmonogramu czarnego ekranu.`
+          : blackScreenMode === "on"
+            ? `Włączono czarny ekran dla tabletu ${getDeviceDisplayName(device)}.`
+            : `Wyłączono czarny ekran dla tabletu ${getDeviceDisplayName(device)}.`;
+
+      pushToast(toastMessage, "success");
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się zmienić stanu czarnego ekranu.",
+        "danger",
+      );
+    } finally {
+      setBlackScreenMutationDeviceId(null);
+    }
+  };
+
+  const handleBatchThemeUpdate = async () => {
+    const selectedDevices = selectedVisibleDevices;
+
+    if (selectedDevices.length === 0) {
+      pushToast("Zaznacz co najmniej jeden tablet.", "danger");
+      return;
+    }
+
+    try {
+      setBatchThemeLoading(true);
+      const response = await fetch("/api/devices/display-settings/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deviceIds: selectedDevices.map((device) => device.id),
+          displayTheme: batchThemeValue,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się zapisać motywu dla zaznaczonych tabletów.");
+      }
+
+      const updatedDevices = Array.isArray(data.devices)
+        ? (data.devices as Device[]).map(normalizeDeviceRecord)
+        : [];
+      if (updatedDevices.length > 0) {
+        const updatedDeviceMap = new Map(updatedDevices.map((device) => [device.id, device]));
+        setDevices((current) =>
+          current.map((device) => updatedDeviceMap.get(device.id) ?? device),
+        );
+      }
+
+      pushToast(
+        `Zmieniono motyw ${updatedDevices.length || selectedDevices.length} tabletów na ${
+          batchThemeValue === "light" ? "jasny" : "ciemny"
+        }.`,
+        "success",
+      );
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się zmienić motywu zaznaczonych tabletów.",
+        "danger",
+      );
+    } finally {
+      setBatchThemeLoading(false);
+    }
+  };
+
+  const handleBatchBlackScreenUpdate = async () => {
+    const selectedDevices = selectedVisibleDevices;
+
+    if (selectedDevices.length === 0) {
+      pushToast("Zaznacz co najmniej jeden tablet.", "danger");
+      return;
+    }
+
+    try {
+      setBatchBlackScreenLoading(true);
+      const response = await fetch("/api/devices/display-settings/batch", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deviceIds: selectedDevices.map((device) => device.id),
+          blackScreenMode: batchBlackScreenValue,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Nie udało się zapisać czarnego ekranu dla zaznaczonych tabletów.",
+        );
+      }
+
+      const updatedDevices = Array.isArray(data.devices)
+        ? (data.devices as Device[]).map(normalizeDeviceRecord)
+        : [];
+      if (updatedDevices.length > 0) {
+        const updatedDeviceMap = new Map(updatedDevices.map((device) => [device.id, device]));
+        setDevices((current) =>
+          current.map((device) => updatedDeviceMap.get(device.id) ?? device),
+        );
+      }
+
+      const blackScreenLabel =
+        batchBlackScreenValue === "follow"
+          ? "harmonogram"
+          : batchBlackScreenValue === "on"
+            ? "włączony"
+            : "wyłączony";
+
+      pushToast(
+        `Ustawiono czarny ekran ${updatedDevices.length || selectedDevices.length} tabletów na ${blackScreenLabel}.`,
+        "success",
+      );
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się zmienić czarnego ekranu zaznaczonych tabletów.",
+        "danger",
+      );
+    } finally {
+      setBatchBlackScreenLoading(false);
+    }
+  };
+
+  const applyReturnedDevices = (returnedDevices: unknown) => {
+    if (!Array.isArray(returnedDevices) || returnedDevices.length === 0) {
+      return;
+    }
+
+    const updatedDevices = (returnedDevices as Device[]).map(normalizeDeviceRecord);
+    const updatedDeviceMap = new Map(updatedDevices.map((device) => [device.id, device]));
+    setDevices((current) =>
+      current.map((device) => updatedDeviceMap.get(device.id) ?? device),
+    );
+  };
+
+  const handleBatchPriorityMessageActivate = async () => {
+    const selectedDevices = selectedVisibleDevices;
+
+    if (selectedDevices.length === 0) {
+      pushToast("Zaznacz co najmniej jeden tablet.", "danger");
+      return;
+    }
+
+    if (!batchPriorityMessageTemplateId) {
+      pushToast("Wybierz komunikat priorytetowy.", "danger");
+      return;
+    }
+
+    try {
+      setBatchPriorityMessageLoading(true);
+      const response = await fetch("/api/devices/priority-messages/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          deviceIds: selectedDevices.map((device) => device.id),
+          templateId: batchPriorityMessageTemplateId,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Nie udało się włączyć komunikatu priorytetowego.",
+        );
+      }
+
+      applyReturnedDevices(data.devices);
+      pushToast(
+        `Włączono komunikat priorytetowy na ${data.updatedCount ?? selectedDevices.length} tabletach.`,
+        "success",
+      );
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się włączyć komunikatu priorytetowego.",
+        "danger",
+      );
+    } finally {
+      setBatchPriorityMessageLoading(false);
+    }
+  };
+
+  const handleBatchPriorityMessageClear = async () => {
+    const selectedDevices = selectedVisibleDevices;
+
+    if (selectedDevices.length === 0) {
+      pushToast("Zaznacz co najmniej jeden tablet.", "danger");
+      return;
+    }
+
+    try {
+      setBatchPriorityMessageClearLoading(true);
+      const response = await fetch("/api/devices/priority-messages/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          deviceIds: selectedDevices.map((device) => device.id),
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Nie udało się wyłączyć komunikatu priorytetowego.",
+        );
+      }
+
+      applyReturnedDevices(data.devices);
+      pushToast(
+        `Wyłączono komunikat priorytetowy na ${data.updatedCount ?? selectedDevices.length} tabletach.`,
+        "success",
+      );
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się wyłączyć komunikatu priorytetowego.",
+        "danger",
+      );
+    } finally {
+      setBatchPriorityMessageClearLoading(false);
+    }
+  };
+
+  const getPriorityMessageFileMimeType = (file: File) => {
+    if (file.type) {
+      return file.type;
+    }
+
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith(".gif")) {
+      return "image/gif";
+    }
+    if (fileName.endsWith(".png")) {
+      return "image/png";
+    }
+    if (fileName.endsWith(".webp")) {
+      return "image/webp";
+    }
+
+    return "image/jpeg";
+  };
+
+  const handlePriorityMessageMediaUpload = async (file: File) => {
+    setPriorityMessageUploading(true);
+
+    try {
+      const contentBase64 = await readFileAsBase64(file);
+      const response = await fetch("/api/devices/priority-messages/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType: getPriorityMessageFileMimeType(file),
+          contentBase64,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || typeof data.imageUrl !== "string") {
+        throw new Error(data.message || "Nie udało się wgrać pliku komunikatu.");
+      }
+
+      return data.imageUrl as string;
+    } finally {
+      setPriorityMessageUploading(false);
+    }
+  };
+
+  const handlePriorityMessageTemplateCreate = async (payload: {
+    name: string;
+    file: File | null;
+  }) => {
+    const name = payload.name.trim();
+
+    if (!name || !payload.file) {
+      pushToast("Podaj nazwę i wybierz plik komunikatu.", "danger");
+      return false;
+    }
+
+    try {
+      setPriorityMessageCreating(true);
+      const imageUrl = await handlePriorityMessageMediaUpload(payload.file);
+
+      const response = await fetch("/api/devices/priority-messages/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name, imageUrl }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się dodać definicji komunikatu.");
+      }
+
+      const templates = Array.isArray(data.templates)
+        ? (data.templates as PriorityMessageTemplate[])
+        : [];
+      const template = data.template as PriorityMessageTemplate | undefined;
+
+      applyPriorityMessageTemplateList(templates, template?.id);
+      await Promise.all([
+        fetchPriorityMessageSchedules({ silent: true }),
+        fetchPriorityMessagePresets({ silent: true }),
+      ]);
+      pushToast("Dodano definicję komunikatu priorytetowego.", "success");
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Nie udało się dodać definicji komunikatu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessageCreating(false);
+    }
+  };
+
+  const handlePriorityMessageTemplateUpdate = async (
+    template: PriorityMessageTemplate,
+    payload: { name: string },
+  ) => {
+    const name = payload.name.trim();
+
+    if (!name) {
+      pushToast("Podaj nazwę komunikatu.", "danger");
+      return false;
+    }
+
+    try {
+      setPriorityMessageMutatingTemplateId(template.id);
+      const response = await fetch(
+        `/api/devices/priority-messages/templates/${encodeURIComponent(template.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ name, imageUrl: template.imageUrl }),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się zapisać komunikatu.");
+      }
+
+      const templates = Array.isArray(data.templates)
+        ? (data.templates as PriorityMessageTemplate[])
+        : [];
+      applyPriorityMessageTemplateList(templates, template.id);
+      applyReturnedDevices(data.devices);
+      await Promise.all([
+        fetchPriorityMessageSchedules({ silent: true }),
+        fetchPriorityMessagePresets({ silent: true }),
+      ]);
+      pushToast("Zapisano komunikat priorytetowy.", "success");
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Nie udało się zapisać komunikatu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessageMutatingTemplateId(null);
+    }
+  };
+
+  const handlePriorityMessageTemplateDelete = async (template: PriorityMessageTemplate) => {
+    const shouldDelete = window.confirm(`Usunąć komunikat "${template.name}" z galerii?`);
+    if (!shouldDelete) {
+      return false;
+    }
+
+    try {
+      setPriorityMessageMutatingTemplateId(template.id);
+      const response = await fetch(
+        `/api/devices/priority-messages/templates/${encodeURIComponent(template.id)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się usunąć komunikatu.");
+      }
+
+      const templates = Array.isArray(data.templates)
+        ? (data.templates as PriorityMessageTemplate[])
+        : [];
+      applyPriorityMessageTemplateList(templates);
+      applyReturnedDevices(data.devices);
+      await Promise.all([
+        fetchPriorityMessageSchedules({ silent: true }),
+        fetchPriorityMessagePresets({ silent: true }),
+      ]);
+      pushToast("Usunięto komunikat priorytetowy.", "success");
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Nie udało się usunąć komunikatu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessageMutatingTemplateId(null);
+    }
+  };
+
+  const formatScheduleCollisionConfirmation = (
+    collisions: PriorityMessageScheduleCollision[],
+  ) => {
+    const collisionNames = Array.from(
+      new Set(collisions.map((collision) => collision.templateName)),
+    ).slice(0, 3);
+    const affectedDeviceCount = new Set(
+      collisions.flatMap((collision) => collision.deviceIds),
+    ).size;
+    const extraCount = Math.max(
+      0,
+      new Set(collisions.map((collision) => collision.templateName)).size -
+        collisionNames.length,
+    );
+
+    return [
+      `Wykryto kolizję dla ${affectedDeviceCount} ${
+        affectedDeviceCount === 1 ? "tabletu" : "tabletów"
+      }.`,
+      `Nakładające komunikaty: ${collisionNames.join(", ")}${
+        extraCount > 0 ? ` i ${extraCount} więcej` : ""
+      }.`,
+      "Wyższy priorytet wygrywa, a przy remisie nowsza edycja. Zapisać mimo kolizji?",
+    ].join("\n\n");
+  };
+
+  const handlePriorityMessageScheduleSave = async (
+    scheduleId: string | null,
+    payload: PriorityMessageSchedulePayload,
+  ) => {
+    const submit = async (confirmCollisions: boolean) => {
+      const response = await fetch(
+        scheduleId
+          ? `/api/devices/priority-messages/schedules/${encodeURIComponent(scheduleId)}`
+          : "/api/devices/priority-messages/schedules",
+        {
+          method: scheduleId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ ...payload, confirmCollisions }),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      return { response, data };
+    };
+
+    try {
+      setPriorityMessageScheduleSaving(true);
+      setPriorityMessageScheduleMutationId(scheduleId ?? "new");
+      let result = await submit(false);
+
+      if (
+        result.response.status === 409 &&
+        result.data.requiresConfirmation &&
+        Array.isArray(result.data.collisions)
+      ) {
+        const collisions = result.data
+          .collisions as PriorityMessageScheduleCollision[];
+        const confirmed = window.confirm(
+          formatScheduleCollisionConfirmation(collisions),
+        );
+        if (!confirmed) {
+          return false;
+        }
+        result = await submit(true);
+      }
+
+      if (!result.response.ok) {
+        throw new Error(
+          result.data.message || "Nie udało się zapisać harmonogramu komunikatu.",
+        );
+      }
+
+      await Promise.all([
+        fetchPriorityMessageSchedules({ silent: true }),
+        fetchDevices({ silent: true }),
+      ]);
+      pushToast(
+        scheduleId
+          ? "Zapisano harmonogram komunikatu."
+          : "Zaplanowano komunikat priorytetowy.",
+        "success",
+      );
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się zapisać harmonogramu komunikatu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessageScheduleSaving(false);
+      setPriorityMessageScheduleMutationId(null);
+    }
+  };
+
+  const handlePriorityMessageScheduleDelete = async (
+    schedule: PriorityMessageSchedule,
+  ) => {
+    const shouldDelete = window.confirm(
+      `Usunąć ${
+        schedule.status === "active" ? "aktywny" : "zaplanowany"
+      } komunikat "${schedule.template.name}"?`,
+    );
+    if (!shouldDelete) {
+      return false;
+    }
+
+    try {
+      setPriorityMessageScheduleMutationId(schedule.id);
+      const response = await fetch(
+        `/api/devices/priority-messages/schedules/${encodeURIComponent(schedule.id)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się usunąć harmonogramu.");
+      }
+
+      await Promise.all([
+        fetchPriorityMessageSchedules({ silent: true }),
+        fetchDevices({ silent: true }),
+      ]);
+      pushToast("Usunięto harmonogram komunikatu.", "success");
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error ? error.message : "Nie udało się usunąć harmonogramu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessageScheduleMutationId(null);
+    }
+  };
+
+  const handlePriorityMessagePresetSave = async (
+    presetId: string | null,
+    payload: PriorityMessagePresetPayload,
+  ) => {
+    try {
+      setPriorityMessagePresetMutationId(presetId ?? "new");
+      const response = await fetch(
+        presetId
+          ? `/api/devices/priority-messages/presets/${encodeURIComponent(presetId)}`
+          : "/api/devices/priority-messages/presets",
+        {
+          method: presetId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się zapisać presetu komunikatu.");
+      }
+
+      setPriorityMessagePresets(
+        Array.isArray(data.presets) ? (data.presets as PriorityMessagePreset[]) : [],
+      );
+      pushToast(
+        presetId ? "Zapisano preset komunikatu." : "Dodano preset komunikatu.",
+        "success",
+      );
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się zapisać presetu komunikatu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessagePresetMutationId(null);
+    }
+  };
+
+  const handlePriorityMessagePresetDelete = async (
+    preset: PriorityMessagePreset,
+  ) => {
+    if (!window.confirm(`Usunąć preset "${preset.name}"?`)) {
+      return false;
+    }
+
+    try {
+      setPriorityMessagePresetMutationId(preset.id);
+      const response = await fetch(
+        `/api/devices/priority-messages/presets/${encodeURIComponent(preset.id)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się usunąć presetu komunikatu.");
+      }
+
+      setPriorityMessagePresets(
+        Array.isArray(data.presets) ? (data.presets as PriorityMessagePreset[]) : [],
+      );
+      pushToast("Usunięto preset komunikatu.", "success");
+      return true;
+    } catch (error) {
+      pushToast(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się usunąć presetu komunikatu.",
+        "danger",
+      );
+      return false;
+    } finally {
+      setPriorityMessagePresetMutationId(null);
+    }
+  };
+
+  const fetchAdmins = async () => {
+    try {
+      setAdminsLoading(true);
+      const response = await fetch("/api/admins", {
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error("Nie udało się pobrać listy administratorów.");
+      }
+
+      const data = await response.json();
+      setAdmins(Array.isArray(data.admins) ? data.admins : []);
+    } catch (error) {
+      console.error("Error fetching admins:", error);
+      setAdminFeedback("Nie udało się pobrać listy administratorów.");
+      setAdminFeedbackTone("danger");
+    } finally {
+      setAdminsLoading(false);
+    }
+  };
+
+  const fetchNightModeSettings = async () => {
+    try {
+      setNightModeLoading(true);
+      const response = await fetch("/api/devices/display-settings");
+
+      if (!response.ok) {
+        throw new Error("Nie udało się pobrać ustawień.");
+      }
+
+      const data = await response.json();
+      setNightModeSettings(data.nightMode ?? defaultNightModeSettings);
+    } catch (error) {
+      console.error("Error fetching night mode settings:", error);
+      setNightModeFeedback("Nie udało się pobrać ustawień.");
+      setNightModeFeedbackTone("danger");
+    } finally {
+      setNightModeLoading(false);
+    }
+  };
+
+  const handleNightModeSettingsSave = async () => {
+    if (nightModeSettings.startTime === nightModeSettings.endTime) {
+      setNightModeFeedback("Godzina startu i końca nie mogą być takie same.");
+      setNightModeFeedbackTone("danger");
+      return;
+    }
+
+    try {
+      setNightModeSaving(true);
+      setNightModeFeedback(null);
+
+      const response = await fetch("/api/devices/display-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nightModeSettings),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się zapisać ustawień.");
+      }
+
+      setNightModeSettings(data.nightMode ?? nightModeSettings);
+      setNightModeFeedback(`Zapisano. Wysłano do ${data.delivered ?? 0} ekranów.`);
+      setNightModeFeedbackTone("success");
+      pushToast(`Zapisano ustawienia. Wysłano do ${data.delivered ?? 0} ekranów.`, "success");
+    } catch (error) {
+      console.error("Error saving night mode settings:", error);
+      setNightModeFeedback(
+        error instanceof Error ? error.message : "Nie udało się zapisać ustawień.",
+      );
+      setNightModeFeedbackTone("danger");
+    } finally {
+      setNightModeSaving(false);
+    }
+  };
+
+  const handleReloadAllTablets = async () => {
+    try {
+      setReloadingTablets(true);
+
+      const response = await fetch("/api/devices/reload-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: "admin-manual-tablet-reload",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Nie udało się wysłać komendy.");
+      }
+
+      const data = await response.json();
+      pushToast(`Wysłano sygnał do ${data.delivered} połączeń.`, "success");
+    } catch (error) {
+      console.error("Error reloading tablets:", error);
+      pushToast("Nie udało się wysłać komendy.", "danger");
+    } finally {
+      setReloadingTablets(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchDevices();
+    void fetchNightModeSettings();
+    void fetchPriorityMessageTemplates();
+    void fetchPriorityMessageSchedules();
+    void fetchPriorityMessagePresets();
+    void fetchAdmins();
+    void fetchSession().then(setSession).catch((error) => {
+      console.error("Error fetching session:", error);
+    });
+    const interval = window.setInterval(() => {
+      void fetchDevices({ silent: true });
+    }, 5000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (currentView === "schedule") {
+      void fetchNightModeSettings();
+    }
+  }, [currentView]);
+
+  useEffect(() => {
+    if (currentView !== "priority-gallery") {
+      return;
+    }
+
+    void fetchPriorityMessageSchedules({ silent: true });
+    void fetchPriorityMessagePresets({ silent: true });
+    const interval = window.setInterval(() => {
+      void fetchPriorityMessageSchedules({ silent: true });
+    }, 10000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentView]);
+
+  useEffect(() => {
+    if (currentView !== "tablet-preview") {
+      return;
+    }
+
+    if (activeDevices.length === 0) {
+      if (previewDeviceId !== null) {
+        setTabletPreviewSearchParams(null);
+      }
+      setPreviewState(null);
+      return;
+    }
+
+    if (previewDeviceId === null) {
+      setTabletPreviewSearchParams(activeDevices[0].id);
+      return;
+    }
+
+    if (!previewDevice) {
+      setTabletPreviewSearchParams(activeDevices[0].id);
+      return;
+    }
+
+    if (!previewState || previewState.deviceId !== previewDevice.id) {
+      void openDevicePreview(previewDevice);
+    }
+  }, [
+    activeDevices,
+    currentView,
+    previewDevice,
+    previewDeviceId,
+    previewState,
+    setTabletPreviewSearchParams,
+  ]);
+
+  useEffect(() => {
+    if (previewState?.phase !== "loading-profile" || previewState.requestedAt === null) {
+      return;
+    }
+
+    let cancelled = false;
+    const deadlineAt = previewState.requestedAt + 10_000;
+    const requestedPreviewDeviceId = previewState.deviceId;
+
+    const pollForProfile = async () => {
+      try {
+        const response = await fetch(`/api/devices/${requestedPreviewDeviceId}`);
+        if (!response.ok) {
+          throw new Error("Nie udało się pobrać danych urządzenia.");
+        }
+
+        const nextDevice = normalizeDeviceRecord((await response.json()) as Device);
+        if (cancelled) {
+          return;
+        }
+
+        setDevices((current) =>
+          current.map((device) => (device.id === nextDevice.id ? nextDevice : device)),
+        );
+
+        if (hasDeviceDisplayProfile(nextDevice)) {
+          setPreviewState((current) =>
+            current && current.deviceId === requestedPreviewDeviceId
+              ? {
+                  ...current,
+                  phase: "ready",
+                  message: null,
+                  requestedAt: null,
+                }
+              : current,
+          );
+          return;
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("Error fetching device preview profile:", error);
+      }
+
+      if (Date.now() >= deadlineAt) {
+        setPreviewState((current) =>
+          current && current.deviceId === requestedPreviewDeviceId
+            ? {
+                ...current,
+                phase: "error",
+                message: "Nie udało się pobrać parametrów ekranu z podłączonego tabletu.",
+                requestedAt: null,
+              }
+            : current,
+        );
+      }
+    };
+
+    void pollForProfile();
+    const intervalId = window.setInterval(() => {
+      void pollForProfile();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [previewState]);
+
+  const handleLogout = async () => {
+    try {
+      closeMobilePanels();
+      await logout();
+      navigate("/");
+    } catch (error) {
+      console.error("Error during logout:", error);
+      alert("Nie udało się wylogować. Spróbuj ponownie.");
+    }
+  };
+
+  const handleAddAdmin = async () => {
+    const username = newAdminUsername.trim().toLowerCase();
+
+    if (!username) {
+      setAdminFeedback("Podaj login LDAP.");
+      setAdminFeedbackTone("danger");
+      return;
+    }
+
+    try {
+      setAdminMutationLoading(true);
+      setAdminFeedback(null);
+
+      const response = await fetch("/api/admins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ username }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się dodać administratora.");
+      }
+
+      setNewAdminUsername("");
+      setAdminFeedback(data.message || "Dodano administratora.");
+      setAdminFeedbackTone("success");
+      await fetchAdmins();
+    } catch (error) {
+      console.error("Error adding admin:", error);
+      setAdminFeedback(
+        error instanceof Error ? error.message : "Nie udało się dodać administratora.",
+      );
+      setAdminFeedbackTone("danger");
+    } finally {
+      setAdminMutationLoading(false);
+    }
+  };
+
+  const handleRemoveAdmin = async (admin: AdminRecord) => {
+    if (!admin.canBeRemovedFromPanel) {
+      setAdminFeedback("Tego konta administratora nie można usunąć z panelu.");
+      setAdminFeedbackTone("danger");
+      return;
+    }
+
+    if (admin.isCurrentUser) {
+      setAdminFeedback("Nie możesz usunąć własnego konta administratora.");
+      setAdminFeedbackTone("danger");
+      return;
+    }
+
+    const shouldDelete = window.confirm(`Usunąć administratora ${admin.username}?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      setAdminMutationLoading(true);
+      setAdminFeedback(null);
+
+      const response = await fetch(
+        `/api/admins/${encodeURIComponent(admin.username)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się usunąć administratora.");
+      }
+
+      setAdminFeedback(data.message || "Usunięto administratora.");
+      setAdminFeedbackTone("success");
+      await fetchAdmins();
+    } catch (error) {
+      console.error("Error removing admin:", error);
+      setAdminFeedback(
+        error instanceof Error ? error.message : "Nie udało się usunąć administratora.",
+      );
+      setAdminFeedbackTone("danger");
+    } finally {
+      setAdminMutationLoading(false);
+    }
+  };
+
+  const openDeviceEditor = (device: Device) => {
+    resetRoomSearch();
+    const currentRoom = sanitizeRoomValue(device.deviceClassroom || "");
+
+    setDrawerDeviceId(device.id);
+    setFormClassroom(currentRoom);
+    setSelectedSuggestion(currentRoom || null);
+  };
+
+  const openPairingScanner = () => {
+    closeMobilePanels();
+    closeDrawer();
+    setPairingReturnMode("none");
+    setPairingScannerOpen(true);
+  };
+
+  const handlePreviewRetry = () => {
+    if (!previewDevice) {
+      return;
+    }
+
+    void openDevicePreview(previewDevice, { forceProfileRefresh: true });
+  };
+
+  const validateRoom = async (roomName: string): Promise<boolean> => {
+    const normalizedRoom = normalizeRoomValue(roomName);
+
+    if (!normalizedRoom) {
+      return false;
+    }
+
+    if (knownRoomsRef.current.has(normalizedRoom)) {
+      return true;
+    }
+
+    try {
+      const rooms = await fetchRoomMatches(roomName);
+      return rooms.some((room) => normalizeRoomValue(room) === normalizedRoom);
+    } catch {
+      return false;
+    }
+  };
+
+  const updateDeviceRoomAssignment = async (deviceId: number, roomName: string) => {
+    const response = await fetch(`/api/devices/${deviceId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: deviceId,
+        deviceClassroom: roomName,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        ok: false as const,
+        message: errorData.message || "Nie udało się zapisać zmian.",
+      };
+    }
+
+    return { ok: true as const };
+  };
+
+  const lookupPendingDeviceByCode = async (rawDeviceId: string) => {
+    const normalizedDeviceId = sanitizePairingDeviceId(rawDeviceId);
+
+    if (!/^\d{6}$/.test(normalizedDeviceId)) {
+      return {
+        ok: false as const,
+        message: PAIRING_MESSAGE.codeInvalid,
+      };
+    }
+
+    try {
+      const response = await fetch(
+        `/api/devices/pending/by-code?deviceId=${encodeURIComponent(normalizedDeviceId)}`,
+      );
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        return {
+          ok: false as const,
+          message:
+            response.status === 400
+              ? PAIRING_MESSAGE.codeInvalid
+              : response.status === 404
+                ? PAIRING_MESSAGE.codeNotFound
+                : PAIRING_MESSAGE.lookupError,
+        };
+      }
+
+      const device = normalizeDeviceRecord(data as Device);
+      setDevices((current) => {
+        const exists = current.some((currentDevice) => currentDevice.id === device.id);
+        return exists
+          ? current.map((currentDevice) =>
+              currentDevice.id === device.id ? device : currentDevice,
+            )
+          : [...current, device];
+      });
+
+      return { ok: true as const, device };
+    } catch (error) {
+      console.error("Error looking up pending device:", error);
+      return {
+        ok: false as const,
+        message: PAIRING_MESSAGE.lookupConnectionError,
+      };
+    }
+  };
+
+  const selectPendingPairingDevice = (device: Device) => {
+    if (currentView !== "devices") {
+      setSearchParams({});
+    }
+
+    closeDrawer();
+    setPairingScannerOpen(false);
+    resetPairingRoomSearch();
+    setPairingCode(formatPairingDeviceId(device.deviceId));
+    setPairingDeviceId(device.id);
+    setPairingRoom("");
+    setPairingCodeTone("success");
+    setPairingRoomTone("neutral");
+    pushToast(PAIRING_MESSAGE.found, "success");
+  };
+
+  const handleLookupPendingPairingDevice = async (rawDeviceId?: string) => {
+    const deviceId = rawDeviceId ?? pairingCode;
+
+    setPairingLookingUp(true);
+    setPairingCodeTone("neutral");
+
+    const result = await lookupPendingDeviceByCode(deviceId);
+
+    if (!result.ok) {
+      setPairingCodeTone("danger");
+      pushToast(result.message, "danger");
+      setPairingLookingUp(false);
+      return result;
+    }
+
+    selectPendingPairingDevice(result.device);
+    setPairingLookingUp(false);
+
+    return { ok: true as const };
+  };
+
+  const handlePairingLookup = async (deviceId: string) => {
+    const result = await lookupPendingDeviceByCode(deviceId);
+    if (!result.ok) {
+      return result;
+    }
+
+    setPairingScannerOpen(false);
+    setPairingReturnMode("after-save");
+    openDeviceEditor(result.device);
+
+    return { ok: true as const };
+  };
+
+  const handleRegister = async () => {
+    const device = drawerDevice;
+    const sanitizedRoom = sanitizeRoomValue(formClassroom);
+
+    if (!device || !sanitizedRoom) {
+      setRoomError("Wprowadź nazwę sali.");
+      return;
+    }
+
+    roomSearchAbortRef.current?.abort();
+    roomSearchAbortRef.current = null;
+    roomSearchRequestIdRef.current += 1;
+    setIsSearching(false);
+    setShowSuggestions(false);
+
+    const normalizedRoom = normalizeRoomValue(sanitizedRoom);
+    const isValid =
+      (selectedSuggestion !== null &&
+        normalizeRoomValue(selectedSuggestion) === normalizedRoom) ||
+      (await validateRoom(sanitizedRoom));
+
+    if (!isValid) {
+      setRoomError("Wybrana sala nie istnieje w planie.");
+      return;
+    }
+
+    try {
+      const deviceLabel =
+        device.deviceClassroom || formatPairingDeviceId(device.deviceId);
+      const result = await updateDeviceRoomAssignment(device.id, sanitizedRoom);
+      if (!result.ok) {
+        setRoomError(result.message);
+        return;
+      }
+
+      const shouldReturnToScanner = pairingReturnMode === "after-save";
+      setPairingReturnMode("none");
+      closeDrawer();
+      pushToast(`Zapisano zmiany dla tabletu ${deviceLabel}.`, "success");
+      await fetchDevices();
+
+      if (shouldReturnToScanner) {
+        setPairingScannerOpen(true);
+      }
+    } catch (error) {
+      console.error("Error registering device", error);
+      setRoomError("Nie udało się zapisać zmian.");
+      pushToast("Nie udało się zapisać zmian tabletu.", "danger");
+    }
+  };
+
+  const handleAssignPendingDevice = async () => {
+    const device = pairingDevice;
+    const sanitizedRoom = sanitizeRoomValue(pairingRoom);
+
+    if (!device || !sanitizedRoom) {
+      setPairingRoomTone("danger");
+      pushToast(PAIRING_MESSAGE.roomRequired, "danger");
+      return;
+    }
+
+    resetPairingRoomSearch();
+
+    const normalizedRoom = normalizeRoomValue(sanitizedRoom);
+    const isValid =
+      (pairingSelectedSuggestion !== null &&
+        normalizeRoomValue(pairingSelectedSuggestion) === normalizedRoom) ||
+      (await validateRoom(sanitizedRoom));
+
+    if (!isValid) {
+      setPairingRoomTone("danger");
+      pushToast(PAIRING_MESSAGE.roomInvalid, "danger");
+      return;
+    }
+
+    try {
+      setPairingAssigning(true);
+      setPairingRoomTone("success");
+      const result = await updateDeviceRoomAssignment(device.id, sanitizedRoom);
+      if (!result.ok) {
+        setPairingRoomTone("danger");
+        pushToast(result.message || PAIRING_MESSAGE.assignError, "danger");
+        return;
+      }
+
+      resetPairingSelection();
+      pushToast(PAIRING_MESSAGE.assigned, "success");
+      await fetchDevices();
+    } catch (error) {
+      console.error("Error assigning pending device:", error);
+      setPairingRoomTone("danger");
+      pushToast(PAIRING_MESSAGE.assignError, "danger");
+    } finally {
+      setPairingAssigning(false);
+    }
+  };
+
+  const handlePairingCodeChange = (value: string) => {
+    setPairingCode(formatPairingDeviceInput(value));
+    setPairingCodeTone("neutral");
+  };
+
+  const handlePairingRoomChange = (value: string) => {
+    setPairingRoom(value);
+    setPairingSelectedSuggestion(null);
+    setPairingRoomTone("neutral");
+    setPairingShowRoomSuggestions(true);
+  };
+
+  const handleResetPairing = () => {
+    resetPairingSelection();
+  };
+
+  const handlePairingSuggestionSelect = (device: Device) => {
+    setPairingCode(formatPairingDeviceId(device.deviceId));
+    void handleLookupPendingPairingDevice(device.deviceId);
+  };
+
+  const handleDeleteDevice = async (device: Device) => {
+    const confirmationLabel =
+      device.status === "PENDING"
+        ? "Odrzucić urządzenie z kolejki?"
+        : "Usunąć urządzenie z rejestru?";
+    const shouldDelete = window.confirm(confirmationLabel);
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      const deviceLabel =
+        device.deviceClassroom || formatPairingDeviceId(device.deviceId);
+      const shouldReturnToScanner =
+        pairingReturnMode === "after-save" && drawerDeviceId === device.id;
+      const response = await fetch(`/api/devices/${device.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        pushToast("Nie udało się usunąć urządzenia.", "danger");
+        return;
+      }
+
+      if (drawerDeviceId === device.id) {
+        closeDrawer();
+      }
+      if (previewDeviceId === device.id) {
+        setPreviewState(null);
+        setTabletPreviewSearchParams(null);
+      }
+      if (pairingDeviceId === device.id) {
+        resetPairingSelection();
+      }
+      if (shouldReturnToScanner) {
+        setPairingReturnMode("none");
+      }
+
+      pushToast(`Usunięto tablet ${deviceLabel}.`, "success");
+      await fetchDevices();
+
+      if (shouldReturnToScanner) {
+        setPairingScannerOpen(true);
+      }
+    } catch (error) {
+      console.error("Error deleting device:", error);
+      pushToast("Wystąpił błąd podczas usuwania urządzenia.", "danger");
+    }
+  };
+
+  const handleBanDeviceIp = async (device: Device) => {
+    const ipAddress = device.lastIpAddress?.trim();
+
+    if (!ipAddress || ipAddress === "unknown") {
+      pushToast("Tablet nie ma zapisanego poprawnego IP.", "danger");
+      return;
+    }
+
+    const shouldBan = window.confirm(
+      `Zbanować IP ${ipAddress} i usunąć tablet ${formatPairingDeviceId(
+        device.deviceId,
+      )} z kolejki?`,
+    );
+    if (!shouldBan) {
+      return;
+    }
+
+    try {
+      setBanIpDeviceId(device.id);
+      const response = await fetch(`/api/devices/${device.id}/ban-ip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          reason: "admin-pending-tablet-ban",
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.message || "Nie udało się zbanować IP tabletu.");
+      }
+
+      if (drawerDeviceId === device.id) {
+        closeDrawer();
+      }
+      if (pairingDeviceId === device.id) {
+        resetPairingSelection();
+      }
+
+      pushToast(data.message || `Zbanowano IP ${ipAddress}.`, "success");
+      await fetchDevices({ silent: true });
+    } catch (error) {
+      console.error("Error banning tablet IP:", error);
+      pushToast(
+        error instanceof Error ? error.message : "Nie udało się zbanować IP tabletu.",
+        "danger",
+      );
+    } finally {
+      setBanIpDeviceId(null);
+    }
+  };
+
+  const clearDeviceSelection = () => {
+    setSelectedDeviceIds([]);
+  };
+
+  const handleToggleDeviceSelection = (deviceId: number) => {
+    setSelectedDeviceIds((current) =>
+      current.includes(deviceId)
+        ? current.filter((currentId) => currentId !== deviceId)
+        : [...current, deviceId],
+    );
+  };
+
+  const handleToggleAllActiveDevices = (checked: boolean) => {
+    setSelectedDeviceIds(checked ? [...visibleDeviceIds] : []);
+  };
+
+  const handleDeleteSelectedDevices = async () => {
+    const selectedDevices = selectedVisibleDevices;
+
+    if (selectedDevices.length === 0) {
+      pushToast("Zaznacz co najmniej jeden tablet.", "danger");
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Usunąć ${selectedDevices.length} zaznaczonych tabletów z rejestru?`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
+
+    try {
+      setBatchMutationLoading(true);
+
+      const results = await Promise.allSettled(
+        selectedDevices.map((device) =>
+          fetch(`/api/devices/${device.id}`, { method: "DELETE" }).then(async (response) => {
+            if (!response.ok) {
+              throw new Error("Nie udało się usunąć urządzenia.");
+            }
+          }),
+        ),
+      );
+
+      const deletedCount = results.filter((result) => result.status === "fulfilled").length;
+      const failedCount = results.length - deletedCount;
+
+      if (failedCount > 0) {
+        pushToast(
+          `Usunięto ${deletedCount} z ${results.length} tabletów.`,
+          deletedCount > 0 ? "warning" : "danger",
+        );
+      } else {
+        pushToast(`Usunięto ${deletedCount} tabletów.`, "success");
+      }
+
+      if (deletedCount > 0) {
+        if (drawerDeviceId !== null && selectedDeviceIds.includes(drawerDeviceId)) {
+          closeDrawer();
+        }
+        if (previewDeviceId !== null && selectedDeviceIds.includes(previewDeviceId)) {
+          setPreviewState(null);
+          setTabletPreviewSearchParams(null);
+        }
+
+        clearDeviceSelection();
+        await fetchDevices({ silent: true });
+      }
+    } catch (error) {
+      console.error("Error deleting selected devices:", error);
+      pushToast("Nie udało się usunąć zaznaczonych tabletów.", "danger");
+    } finally {
+      setBatchMutationLoading(false);
+    }
+  };
+
+  const handleViewChange = (view: AdminPanelView) => {
+    closeMobilePanels();
+    closeDrawer();
+    setPairingReturnMode("none");
+    setPairingScannerOpen(false);
+
+    if (view === "devices") {
+      setSearchParams({});
+      return;
+    }
+
+    if (view === "tablet-preview") {
+      if (previewDevice) {
+        openTabletPreviewView(previewDevice.id);
+        return;
+      }
+
+      if (activeDevices.length > 0) {
+        openTabletPreviewView(activeDevices[0].id);
+        return;
+      }
+
+      setTabletPreviewSearchParams(null);
+      return;
+    }
+
+    setSearchParams({ view });
+  };
+
+  const navigationItems: NavigationItem[] = ADMIN_NAVIGATION_ORDER.map((key) => {
+    if (key === "pairing") {
+      return {
+        key,
+        label: "Tryb parowania",
+        icon: "fas fa-camera",
+        active: false,
+      };
+    }
+
+    if (key === "lecturer-preview") {
+      return {
+        key,
+        label: "Podgląd dydaktyka",
+        icon: "fas fa-user-tie",
+        active: false,
+      };
+    }
+
+    return {
+      key,
+      label: adminViewMeta[key].label,
+      icon: adminViewMeta[key].icon,
+      active: currentView === key,
+    };
+  });
+
+  const handleNavigationSelect = (key: AdminNavigationKey) => {
+    closeMobilePanels();
+
+    if (key === "pairing") {
+      openPairingScanner();
+      return;
+    }
+
+    if (key === "lecturer-preview") {
+      navigate("/lecturerPlan?mode=admin-preview");
+      return;
+    }
+
+    handleViewChange(key);
+  };
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleDeviceIds);
+    setSelectedDeviceIds((current) => {
+      const next = current.filter((deviceId) => visibleIds.has(deviceId));
+      return next.length === current.length ? current : next;
+    });
+  }, [visibleDeviceIds]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [currentView]);
+
+  useEffect(() => {
+    const syncScrollTopVisibility = () => {
+      setScrollTopVisible(window.scrollY > SCROLL_TOP_VISIBILITY_THRESHOLD_PX);
+    };
+
+    syncScrollTopVisibility();
+    window.addEventListener("scroll", syncScrollTopVisibility, { passive: true });
+
+    return () => window.removeEventListener("scroll", syncScrollTopVisibility);
+  }, []);
+
+  useEffect(() => {
+    const toastStackNode = toastStackRef.current;
+
+    if (!toastStackNode) {
+      setToastStackOffset(0);
+      return;
+    }
+
+    const syncToastStackOffset = () => {
+      const nextHeight = Math.ceil(toastStackNode.getBoundingClientRect().height);
+      setToastStackOffset(nextHeight > 0 ? nextHeight + SCROLL_TOP_TOAST_GAP_PX : 0);
+    };
+
+    syncToastStackOffset();
+
+    const resizeListener = () => syncToastStackOffset();
+    window.addEventListener("resize", resizeListener);
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        window.removeEventListener("resize", resizeListener);
+      };
+    }
+
+    const observer = new ResizeObserver(() => {
+      syncToastStackOffset();
+    });
+
+    observer.observe(toastStackNode);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resizeListener);
+    };
+  }, [toasts.length]);
+
+  const scrollTopButtonStyle: CSSProperties & { "--admin-scroll-top-toast-offset": string } = {
+    ["--admin-scroll-top-toast-offset" as const]:
+      `${toastStackOffset}px`,
+  };
+
+  return (
+    <div className="admin-console" data-admin-theme={adminTheme}>
+      <header className="admin-console__appbar">
+        <button
+          type="button"
+          className="admin-icon-button admin-console__mobile-trigger"
+          onClick={toggleMobileNav}
+          aria-label="Otwórz sekcje panelu"
+          aria-expanded={isMobileNavOpen}
+        >
+          <i className="fas fa-bars" aria-hidden="true" />
+        </button>
+
+        <div className="admin-console__brand">
+          <img className="admin-console__brand-logo" src={logo} alt="ZUT" />
+          <div className="admin-console__brand-copy">
+            <strong>PlanQR Admin</strong>
+            {session?.login ? (
+              <span className="admin-console__brand-user">Zalogowany: {session.login}</span>
+            ) : null}
+          </div>
+        </div>
+
+        <strong className="admin-console__mobile-title">PlanQR Admin</strong>
+
+        <div className="admin-console__appbar-actions">
+          <AdminPanelThemeToggle theme={adminTheme} onChange={setAdminTheme} />
+          <a className="admin-button admin-button--ghost admin-button--small" href="/adminpanel/kantech">
+            Kantech na żywo
+          </a>
+          {lecturerPanelHref ? (
+            <a
+              className="admin-button admin-button--ghost admin-button--small"
+              href={lecturerPanelHref}
+            >
+              Panel Dydaktyka
+            </a>
+          ) : null}
+          <button
+            type="button"
+            className="admin-button admin-button--ghost admin-button--small"
+            onClick={handleLogout}
+          >
+            Wyloguj
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className="admin-icon-button admin-console__mobile-trigger"
+          onClick={toggleMobileSettings}
+          aria-label="Otwórz ustawienia panelu"
+          aria-expanded={isMobileSettingsOpen}
+        >
+          <i className="fas fa-cog" aria-hidden="true" />
+        </button>
+      </header>
+
+      <div className="admin-console__body">
+        <AdminPanelSidebar
+          className="admin-nav--desktop"
+          navigationItems={navigationItems}
+          onItemSelect={handleNavigationSelect}
+        />
+
+        <main
+          className={[
+            "admin-console__main",
+            currentView === "devices" ? "admin-console__main--devices" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {currentView === "devices" ? (
+            <DevicesView
+              adminTheme={adminTheme}
+              activeDevices={activeDevices}
+              pendingDevices={allPendingDevices}
+              counts={{
+                all: devices.length,
+                online: onlineDevicesCount,
+                offline: offlineDevicesCount,
+                pending: allPendingDevices.length,
+              }}
+              loading={loading}
+              manualRefreshing={manualRefreshing}
+              reloadingTablets={reloadingTablets}
+              batchUpdating={batchMutationLoading}
+              batchThemeUpdating={batchThemeLoading}
+              batchBlackScreenUpdating={batchBlackScreenLoading}
+              batchPriorityMessageUpdating={batchPriorityMessageLoading}
+              batchPriorityMessageClearing={batchPriorityMessageClearLoading}
+              priorityMessagesLoading={priorityMessagesLoading}
+              themeMutationDeviceId={themeMutationDeviceId}
+              blackScreenMutationDeviceId={blackScreenMutationDeviceId}
+              batchThemeValue={batchThemeValue}
+              batchBlackScreenValue={batchBlackScreenValue}
+              batchPriorityMessageTemplateId={batchPriorityMessageTemplateId}
+              priorityMessageTemplates={priorityMessageTemplates}
+              selectedDeviceIds={selectedDeviceIds}
+              visibleDeviceIds={visibleDeviceIds}
+              searchTerm={searchTerm}
+              sortState={deviceSort}
+              pairingCode={pairingCode}
+              pairingSuggestions={pairingSuggestions}
+              pairingDevice={pairingDevice}
+              pairingRoom={pairingRoom}
+              pairingRoomSuggestions={pairingRoomSuggestions}
+              pairingShowRoomSuggestions={pairingShowRoomSuggestions}
+              pairingLookingUp={pairingLookingUp}
+              pairingAssigning={pairingAssigning}
+              pairingSearchingRooms={pairingSearchingRooms}
+              pairingCodeTone={pairingCodeTone}
+              pairingRoomTone={pairingRoomTone}
+              onSearchTermChange={setSearchTerm}
+              onVisibleDeviceIdsChange={setVisibleDeviceIds}
+              onSortColumn={(column) => {
+                setDeviceSort((currentSort) => getNextDeviceSortState(currentSort, column));
+              }}
+              onDeleteSelectedDevices={() => void handleDeleteSelectedDevices()}
+              onBatchThemeValueChange={setBatchThemeValue}
+              onBatchBlackScreenValueChange={setBatchBlackScreenValue}
+              onBatchPriorityMessageTemplateChange={setBatchPriorityMessageTemplateId}
+              onApplyBatchTheme={() => void handleBatchThemeUpdate()}
+              onApplyBatchBlackScreen={() => void handleBatchBlackScreenUpdate()}
+              onApplyBatchPriorityMessage={() => void handleBatchPriorityMessageActivate()}
+              onClearBatchPriorityMessage={() => void handleBatchPriorityMessageClear()}
+              onToggleAllActiveDevices={handleToggleAllActiveDevices}
+              onToggleDeviceSelection={handleToggleDeviceSelection}
+              onRefresh={() => void fetchDevices({ manual: true })}
+              onReloadTablets={handleReloadAllTablets}
+              onEditDevice={openDeviceEditor}
+              onPreviewDevice={(device) => {
+                openTabletPreviewView(device.id);
+              }}
+              onDeviceThemeChange={(device, theme) => {
+                void handleDeviceThemeChange(device, theme);
+              }}
+              onDeviceBlackScreenModeChange={(device, blackScreenMode) => {
+                void handleDeviceBlackScreenModeChange(device, blackScreenMode);
+              }}
+              onDeleteDevice={handleDeleteDevice}
+              onPairingCodeChange={handlePairingCodeChange}
+              onPairingSuggestionSelect={handlePairingSuggestionSelect}
+              onLookupPairingDevice={() => {
+                void handleLookupPendingPairingDevice();
+              }}
+              onResetPairing={handleResetPairing}
+              onPairingRoomChange={handlePairingRoomChange}
+              onPairingRoomSuggestionSelect={(room) => {
+                setPairingRoom(room);
+                setPairingSelectedSuggestion(room);
+                setPairingRoomTone("success");
+                setPairingShowRoomSuggestions(false);
+                setPairingRoomSuggestions([]);
+              }}
+              onAssignPairingDevice={() => {
+                void handleAssignPendingDevice();
+              }}
+            />
+          ) : null}
+
+          {currentView === "pending-tablets" ? (
+            <PendingTabletsView
+              devices={allPendingDevices}
+              loading={loading}
+              manualRefreshing={manualRefreshing}
+              banningDeviceId={banIpDeviceId}
+              searchTerm={pendingSearchTerm}
+              onSearchTermChange={setPendingSearchTerm}
+              onRefresh={() => void fetchDevices({ manual: true })}
+              onPairDevice={(device) => {
+                closeDrawer();
+                openDeviceEditor(device);
+              }}
+              onDeleteDevice={handleDeleteDevice}
+              onBanDeviceIp={(device) => {
+                void handleBanDeviceIp(device);
+              }}
+            />
+          ) : null}
+
+          {currentView === "tablet-preview" ? (
+            <TabletPreviewView
+              activeDevices={pairedDevices}
+              device={previewDevice}
+              state={
+                previewState && previewDeviceId !== null && previewState.deviceId === previewDeviceId
+                  ? {
+                      phase: previewState.phase,
+                      message: previewState.message,
+                    }
+                  : null
+              }
+              onSelectDevice={(deviceId) => {
+                const nextDevice = pairedDevices.find((device) => device.id === deviceId);
+                if (nextDevice) {
+                  openTabletPreviewView(nextDevice.id);
+                }
+              }}
+              onRetryProfile={handlePreviewRetry}
+              onEditDevice={openDeviceEditor}
+              onDeleteDevice={handleDeleteDevice}
+              onUpdateDeviceDisplaySettings={handleDeviceDisplaySettingsUpdate}
+              onToast={pushToast}
+            />
+          ) : null}
+
+          {currentView === "admins" ? (
+            <AdminsView
+              admins={admins}
+              adminsLoading={adminsLoading}
+              adminMutationLoading={adminMutationLoading}
+              newAdminUsername={newAdminUsername}
+              adminFeedback={adminFeedback}
+              adminFeedbackTone={adminFeedbackTone}
+              onUsernameChange={(value) => {
+                setNewAdminUsername(value);
+                setAdminFeedback(null);
+              }}
+              onAddAdmin={handleAddAdmin}
+              onRefreshAdmins={fetchAdmins}
+              onRemoveAdmin={handleRemoveAdmin}
+            />
+          ) : null}
+
+          {currentView === "schedule" ? (
+            <ScheduleView
+              settings={nightModeSettings}
+              loading={nightModeLoading}
+              saving={nightModeSaving}
+              feedback={nightModeFeedback}
+              feedbackTone={nightModeFeedbackTone}
+              onRefresh={fetchNightModeSettings}
+              onSettingChange={(next) => {
+                setNightModeSettings(next);
+                setNightModeFeedback(null);
+              }}
+              onSave={handleNightModeSettingsSave}
+            />
+          ) : null}
+
+          {currentView === "priority-gallery" ? (
+            <PriorityMessagesView
+              adminTheme={adminTheme}
+              templates={priorityMessageTemplates}
+              devices={pairedDevices}
+              schedules={priorityMessageSchedules}
+              presets={priorityMessagePresets}
+              templatesLoading={priorityMessagesLoading}
+              schedulesLoading={priorityMessageSchedulesLoading}
+              presetsLoading={priorityMessagePresetsLoading}
+              scheduleMutationId={priorityMessageScheduleMutationId}
+              presetMutationId={priorityMessagePresetMutationId}
+              creatingSchedule={priorityMessageScheduleSaving}
+              creatingTemplate={priorityMessageCreating}
+              uploadingTemplate={priorityMessageUploading}
+              mutatingTemplateId={priorityMessageMutatingTemplateId}
+              onRefreshTemplates={() => void fetchPriorityMessageTemplates()}
+              onRefreshSchedules={() => void fetchPriorityMessageSchedules()}
+              onRefreshPresets={() => void fetchPriorityMessagePresets()}
+              onSaveSchedule={handlePriorityMessageScheduleSave}
+              onDeleteSchedule={handlePriorityMessageScheduleDelete}
+              onSavePreset={handlePriorityMessagePresetSave}
+              onDeletePreset={handlePriorityMessagePresetDelete}
+              onCreateTemplate={handlePriorityMessageTemplateCreate}
+              onUpdateTemplate={handlePriorityMessageTemplateUpdate}
+              onDeleteTemplate={handlePriorityMessageTemplateDelete}
+            />
+          ) : null}
+        </main>
+      </div>
+
+      {isMobileNavOpen ? (
+        <div
+          className="admin-mobile-panel__overlay admin-mobile-panel__overlay--nav"
+          onClick={closeMobilePanels}
+        >
+          <aside
+            className="admin-mobile-panel admin-mobile-panel--nav"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="admin-mobile-panel__header">
+              <h2 className="admin-mobile-panel__title">Sekcje</h2>
+              <button
+                type="button"
+                className="admin-icon-button"
+                onClick={closeMobilePanels}
+                aria-label="Zamknij sekcje"
+              >
+                <i className="fas fa-times" aria-hidden="true" />
+              </button>
+            </header>
+            <div className="admin-mobile-panel__body">
+              <AdminPanelSidebar
+                className="admin-nav--mobile"
+                navigationItems={navigationItems}
+                onItemSelect={handleNavigationSelect}
+              />
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {isMobileSettingsOpen ? (
+        <div
+          className="admin-mobile-panel__overlay admin-mobile-panel__overlay--settings"
+          onClick={closeMobilePanels}
+        >
+          <aside
+            className="admin-mobile-panel admin-mobile-panel--settings"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="admin-mobile-panel__header">
+              <h2 className="admin-mobile-panel__title">Ustawienia</h2>
+              <button
+                type="button"
+                className="admin-icon-button"
+                onClick={closeMobilePanels}
+                aria-label="Zamknij ustawienia"
+              >
+                <i className="fas fa-times" aria-hidden="true" />
+              </button>
+            </header>
+            <div className="admin-mobile-panel__body">
+              {session?.login ? (
+                <div className="admin-mobile-panel__user">
+                  <span>Zalogowany</span>
+                  <strong>{session.login}</strong>
+                </div>
+              ) : null}
+
+              <AdminPanelThemeToggle theme={adminTheme} onChange={setAdminTheme} />
+
+              <div className="admin-mobile-panel__actions">
+                <a className="admin-button admin-button--ghost" href="/adminpanel/kantech" onClick={closeMobilePanels}>
+                  Kantech na żywo
+                </a>
+                {lecturerPanelHref ? (
+                  <a
+                    className="admin-button admin-button--ghost"
+                    href={lecturerPanelHref}
+                    onClick={closeMobilePanels}
+                  >
+                    Panel Dydaktyka
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  className="admin-button admin-button--ghost"
+                  onClick={handleLogout}
+                >
+                  Wyloguj
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {drawerDevice ? (
+        <DeviceDrawer
+          device={drawerDevice}
+          formClassroom={formClassroom}
+          roomError={roomError}
+          suggestions={suggestions}
+          showSuggestions={showSuggestions}
+          isSearching={isSearching}
+          onClose={handleDrawerClose}
+          onFormChange={(value) => {
+            setFormClassroom(value);
+            setSelectedSuggestion(null);
+            setRoomError("");
+            setShowSuggestions(true);
+          }}
+          onSuggestionSelect={(room) => {
+            setFormClassroom(room);
+            setSelectedSuggestion(room);
+            setRoomError("");
+            setShowSuggestions(false);
+            setSuggestions([]);
+          }}
+          onSave={handleRegister}
+          onDelete={() => void handleDeleteDevice(drawerDevice)}
+        />
+      ) : null}
+
+      {isPairingScannerOpen ? (
+        <AdminPairingScanner
+          onClose={() => {
+            setPairingReturnMode("none");
+            setPairingScannerOpen(false);
+          }}
+          onPair={handlePairingLookup}
+        />
+      ) : null}
+
+      <button
+        type="button"
+        className={`admin-scroll-top-button ${
+          isScrollTopVisible ? "admin-scroll-top-button--visible" : ""
+        }`}
+        style={scrollTopButtonStyle}
+        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        aria-label="Przewiń na górę strony"
+      >
+        <i className="fas fa-arrow-up" aria-hidden="true" />
+      </button>
+
+      {toasts.length > 0 ? (
+        <div
+          ref={toastStackRef}
+          className="admin-toast-stack"
+          aria-live="polite"
+          aria-atomic="false"
+        >
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`admin-toast admin-toast--${toast.tone}`}>
+              <p className="admin-toast__message">{toast.message}</p>
+              <button
+                type="button"
+                className="admin-toast__close"
+                onClick={() => dismissToast(toast.id)}
+                aria-label="Zamknij powiadomienie"
+              >
+                <i className="fas fa-times" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+export default AdminRegistry;

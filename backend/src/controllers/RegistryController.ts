@@ -1,0 +1,363 @@
+import { Request, Response } from 'express';
+import { DeviceList, PrismaClient } from '@prisma/client';
+import { registerTabletStream } from '../services/tabletStreamService';
+import {
+    DEFAULT_TABLET_NIGHT_MODE_SETTINGS,
+    getTabletNightModeSettings
+} from '../services/tabletDisplaySettingsService';
+import {
+    ensureDeviceListDisplaySettingsColumns,
+    serializeDeviceDisplaySettings
+} from '../services/deviceDisplaySettingsService';
+import {
+    DEFAULT_TABLET_PRIORITY_MESSAGE,
+    getPriorityMessageForDevice,
+    TabletPriorityMessage
+} from '../services/tabletPriorityMessageService';
+import { generateDeviceSecret } from '../services/deviceSecretService';
+import { getRequestClientIp } from '../middlewares/securityMiddleware';
+import {
+    ensureTabletIpBanStorage,
+    isTabletIpBanned
+} from '../services/tabletIpBanService';
+
+const prisma = new PrismaClient();
+const MAX_REASONABLE_DIMENSION_PX = 20000;
+const MAX_REASONABLE_DEVICE_PIXEL_RATIO = 20;
+const DEVICE_ID_PATTERN = /^\d{6}$/;
+const MAX_PENDING_DEVICES = 200;
+const loggedPriorityStateByDeviceId = new Map<string, string>();
+
+interface DisplayProfilePayload {
+    viewportWidthPx: number;
+    viewportHeightPx: number;
+    screenWidthPx: number;
+    screenHeightPx: number;
+    devicePixelRatio: number;
+    screenOrientation: string;
+}
+
+const loadNightModeSettings = async () => {
+    try {
+        return await getTabletNightModeSettings(prisma);
+    } catch (error) {
+        console.error('[Registry] Failed to load tablet night mode settings:', error);
+        return DEFAULT_TABLET_NIGHT_MODE_SETTINGS;
+    }
+};
+
+const loadPriorityMessage = async (deviceId: number): Promise<TabletPriorityMessage> => {
+    try {
+        return await getPriorityMessageForDevice(prisma, deviceId);
+    } catch (error) {
+        console.error('[Registry] Failed to load tablet priority message:', error);
+        return DEFAULT_TABLET_PRIORITY_MESSAGE;
+    }
+};
+
+const normalizeDeviceId = (value: unknown) =>
+    typeof value === 'string' ? value.trim() : '';
+
+const isValidDeviceId = (value: string) => DEVICE_ID_PATTERN.test(value);
+
+const preventRegistryConfigCaching = (res: Response) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+};
+
+const formatPriorityUpdatedAt = (priorityMessage: TabletPriorityMessage) => {
+    const updatedAt = priorityMessage.updatedAt;
+    if (!updatedAt) {
+        return 'none';
+    }
+
+    return updatedAt instanceof Date ? updatedAt.toISOString() : String(updatedAt);
+};
+
+const logPriorityStateChange = (
+    device: DeviceList,
+    priorityMessage: TabletPriorityMessage,
+    clientIp: string
+) => {
+    const template = priorityMessage.template;
+    const signature = [
+        priorityMessage.enabled ? 'enabled' : 'disabled',
+        template?.id ?? 'none',
+        formatPriorityUpdatedAt(priorityMessage)
+    ].join(':');
+    const previousSignature = loggedPriorityStateByDeviceId.get(device.deviceId);
+
+    if (previousSignature === signature) {
+        return;
+    }
+
+    if (!priorityMessage.enabled && !previousSignature) {
+        return;
+    }
+
+    loggedPriorityStateByDeviceId.set(device.deviceId, signature);
+    console.info(
+        `[Registry] Tablet priority state changed: deviceId=${device.deviceId} ` +
+        `room=${device.deviceClassroom ?? 'unassigned'} enabled=${priorityMessage.enabled} ` +
+        `template=${template?.id ?? 'none'} imageUrl=${template?.imageUrl ?? 'none'} ` +
+        `updatedAt=${formatPriorityUpdatedAt(priorityMessage)} ip=${clientIp}`
+    );
+};
+
+const parsePositiveInteger = (value: unknown) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return null;
+    }
+
+    const roundedValue = Math.round(value);
+    if (roundedValue < 1 || roundedValue > MAX_REASONABLE_DIMENSION_PX) {
+        return null;
+    }
+
+    return roundedValue;
+};
+
+const parseDisplayProfilePayload = (
+    body: Request['body']
+): { profile?: DisplayProfilePayload; error?: string } => {
+    const viewportWidthPx = parsePositiveInteger(body?.viewportWidthPx);
+    const viewportHeightPx = parsePositiveInteger(body?.viewportHeightPx);
+    const screenWidthPx = parsePositiveInteger(body?.screenWidthPx);
+    const screenHeightPx = parsePositiveInteger(body?.screenHeightPx);
+    const screenOrientation =
+        typeof body?.screenOrientation === 'string' ? body.screenOrientation.trim() : '';
+    const devicePixelRatio =
+        typeof body?.devicePixelRatio === 'number' && Number.isFinite(body.devicePixelRatio)
+            ? body.devicePixelRatio
+            : null;
+
+    if (!viewportWidthPx || !viewportHeightPx || !screenWidthPx || !screenHeightPx) {
+        return { error: 'Wymiary ekranu muszą być dodatnimi liczbami.' };
+    }
+
+    if (
+        devicePixelRatio === null ||
+        devicePixelRatio <= 0 ||
+        devicePixelRatio > MAX_REASONABLE_DEVICE_PIXEL_RATIO
+    ) {
+        return { error: 'devicePixelRatio musi być dodatnią liczbą.' };
+    }
+
+    if (!screenOrientation || screenOrientation.length > 64) {
+        return { error: 'screenOrientation jest wymagane.' };
+    }
+
+    return {
+        profile: {
+            viewportWidthPx,
+            viewportHeightPx,
+            screenWidthPx,
+            screenHeightPx,
+            devicePixelRatio,
+            screenOrientation
+        }
+    };
+};
+
+const buildDeviceConfig = (
+    device: DeviceList | null,
+    nightMode: Awaited<ReturnType<typeof loadNightModeSettings>>,
+    priorityMessage: TabletPriorityMessage
+) => {
+    if (!device || device.status !== 'ACTIVE') {
+        return null;
+    }
+
+    const displaySettings = serializeDeviceDisplaySettings(device);
+
+    return {
+        department: device.deviceClassroom,
+        room: device.deviceClassroom,
+        secretUrl: device.deviceURL,
+        nightMode,
+        displayTheme: displaySettings.displayTheme,
+        blackScreenMode: displaySettings.blackScreenMode,
+        priorityMessage
+    };
+};
+
+export class RegistryController {
+
+    // GET /api/registry/stream/{deviceId}
+    static async stream(req: Request, res: Response) {
+        const deviceId = normalizeDeviceId(req.params.deviceId);
+        const clientIp = getRequestClientIp(req);
+
+        if (!isValidDeviceId(deviceId)) {
+            return res.status(400).json({ message: "DeviceId must be a 6-digit code" });
+        }
+
+        if (await isTabletIpBanned(prisma, clientIp)) {
+            return res.status(403).json({ message: 'Tablet IP is banned.' });
+        }
+
+        registerTabletStream(deviceId, clientIp, res);
+        return;
+    }
+
+    // POST /api/registry/handshake
+    static async handshake(req: Request, res: Response) {
+        preventRegistryConfigCaching(res);
+        await ensureDeviceListDisplaySettingsColumns(prisma);
+        await ensureTabletIpBanStorage(prisma);
+        const clientIp = getRequestClientIp(req);
+        const deviceId = normalizeDeviceId(req.body?.deviceId);
+
+        if (!isValidDeviceId(deviceId)) {
+            return res.status(400).json({ message: "DeviceId must be a 6-digit code" });
+        }
+
+        if (await isTabletIpBanned(prisma, clientIp)) {
+            return res.status(403).json({ message: 'Tablet IP is banned.' });
+        }
+
+        let device = await prisma.deviceList.findUnique({
+            where: { deviceId }
+        });
+
+        if (!device) {
+            const pendingDevicesCount = await prisma.deviceList.count({
+                where: {
+                    status: 'PENDING'
+                }
+            });
+
+            if (pendingDevicesCount >= MAX_PENDING_DEVICES) {
+                return res.status(503).json({
+                    message: 'Too many pending devices. Please pair existing tablets or wait for cleanup.'
+                });
+            }
+
+            // New device, create as PENDING
+            device = await prisma.deviceList.create({
+                data: {
+                    deviceId,
+                    status: 'PENDING',
+                    deviceClassroom: null,
+                    deviceURL: generateDeviceSecret(),
+                    lastIpAddress: clientIp,
+                    lastSeen: new Date()
+                }
+            });
+        } else {
+            device = await prisma.deviceList.update({
+                where: { deviceId },
+                data: {
+                    lastIpAddress: clientIp,
+                    lastSeen: new Date(),
+                    ...(device.deviceURL ? {} : { deviceURL: generateDeviceSecret() })
+                }
+            });
+        }
+
+        const nightMode = await loadNightModeSettings();
+        const priorityMessage =
+            device.status === 'ACTIVE'
+                ? await loadPriorityMessage(device.id)
+                : DEFAULT_TABLET_PRIORITY_MESSAGE;
+
+        // Return status
+        return res.json({
+            status: device.status,
+            config: buildDeviceConfig(device, nightMode, priorityMessage)
+        });
+    }
+
+    // POST /api/registry/display-profile
+    static async updateDisplayProfile(req: Request, res: Response) {
+        await ensureDeviceListDisplaySettingsColumns(prisma);
+        await ensureTabletIpBanStorage(prisma);
+        const clientIp = getRequestClientIp(req);
+        const deviceId = normalizeDeviceId(req.body?.deviceId);
+
+        if (!isValidDeviceId(deviceId)) {
+            return res.status(400).json({ message: 'DeviceId must be a 6-digit code' });
+        }
+
+        if (await isTabletIpBanned(prisma, clientIp)) {
+            return res.status(403).json({ message: 'Tablet IP is banned.' });
+        }
+
+        const parsed = parseDisplayProfilePayload(req.body);
+        if (!parsed.profile) {
+            return res.status(400).json({ message: parsed.error });
+        }
+
+        const existingDevice = await prisma.deviceList.findUnique({
+            where: { deviceId }
+        });
+
+        if (!existingDevice) {
+            return res.status(404).json({ message: 'Device not found' });
+        }
+
+        const updatedDevice = await prisma.deviceList.update({
+            where: { deviceId },
+            data: {
+                ...parsed.profile,
+                displayProfileReportedAt: new Date(),
+                lastIpAddress: clientIp,
+                lastSeen: new Date()
+            }
+        });
+
+        return res.status(200).json({
+            message: 'Zapisano profil ekranu urządzenia.',
+            deviceId: updatedDevice.deviceId,
+            displayProfileReportedAt: updatedDevice.displayProfileReportedAt
+        });
+    }
+
+    // GET /api/registry/status/:deviceId
+    static async checkStatus(req: Request, res: Response) {
+        preventRegistryConfigCaching(res);
+        await ensureDeviceListDisplaySettingsColumns(prisma);
+        await ensureTabletIpBanStorage(prisma);
+        const clientIp = getRequestClientIp(req);
+        const deviceId = normalizeDeviceId(req.params.deviceId);
+
+        if (!isValidDeviceId(deviceId)) {
+            return res.status(400).json({ message: 'DeviceId must be a 6-digit code' });
+        }
+
+        if (await isTabletIpBanned(prisma, clientIp)) {
+            return res.status(403).json({ message: 'Tablet IP is banned.' });
+        }
+
+        const device = await prisma.deviceList.findUnique({
+            where: { deviceId }
+        });
+
+        if (device) {
+            await prisma.deviceList.update({
+                where: { deviceId },
+                data: {
+                    lastIpAddress: clientIp,
+                    lastSeen: new Date()
+                }
+            });
+        }
+
+        if (!device) {
+            return res.status(404).json({ message: "Device not found" });
+        }
+
+        const nightMode = await loadNightModeSettings();
+        const priorityMessage =
+            device.status === 'ACTIVE'
+                ? await loadPriorityMessage(device.id)
+                : DEFAULT_TABLET_PRIORITY_MESSAGE;
+        logPriorityStateChange(device, priorityMessage, clientIp);
+
+        return res.json({
+            status: device.status,
+            config: buildDeviceConfig(device, nightMode, priorityMessage)
+        });
+    }
+}

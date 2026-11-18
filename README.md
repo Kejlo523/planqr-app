@@ -1,0 +1,72 @@
+# PlanQR — aplikacja
+
+- `frontend/` zawiera React, Nginx i Dockerfile frontendu.
+- `backend/` zawiera API TypeScript, proces Kantech, migracje Prisma i Dockerfile backendu.
+- `docker-compose.yml` uruchamia aplikację, a `compose.local.yml` dodaje symulatory i połączenie z lokalną bazą. PostgreSQL i jego Compose są w sąsiednim repozytorium `planqr-db`.
+
+W `legacy/kantech-python/` jest wcześniejszy klient SmartService, przydatny do porównania danych z czytnika podczas pilotażu.
+
+## Uruchomienie lokalne na Windows
+
+Umieść oba repozytoria obok siebie. Uruchom Docker Desktop z WSL 2 i w katalogu `planqr-app` wykonaj w PowerShellu:
+
+```powershell
+.\local\start.ps1
+```
+
+Skrypt tworzy lokalne sekrety, certyfikat HTTPS, bazę z migracjami i symulatory Kantecha, Planu ZUT oraz LDAP. Przeglądarka może poprosić o zaakceptowanie lokalnego certyfikatu. Otwórz `https://localhost:8443/adminpanel/kantech` i zaloguj się jako `pilot-admin`. Hasło to `LDAP_FIXTURE_PASSWORD` z `.env.local`. Opcja `-Mode observe` uruchamia sam podgląd odbić.
+
+Podgląd dydaktyka pobiera prawdziwy plan z `plan.zut.edu.pl`. Karty i zajęcia przypisane do kont testowych korzystają z lokalnego symulatora, ustawionego przez `ZUT_ATTENDANCE_SCHEDULE_URL`.
+
+Do zasymulowania odbicia użyj lokalnego symulatora:
+
+```powershell
+function Test-Tap($Number, $Reader = '49919') {
+    $body = @{ alias = "WISYNC_$Number"; readerId = $Reader } | ConvertTo-Json -Compress
+    Invoke-RestMethod 'http://127.0.0.1:18700/test/scans' -Method Post -ContentType 'application/json' -Body $body
+}
+Test-Tap 1
+Test-Tap 2
+Test-Tap 3
+Start-Sleep -Seconds 3
+Test-Tap 1
+```
+
+Karta `1` należy do prowadzącego, `2` do studenta, `3` do gościa. Domyślne testowe zajęcia mają ID `9001` i zaczynają się pięć minut po starcie symulatora. Pod `/attendance/9001` prowadzący może odświeżyć listę i pobrać XLSX po zamknięciu. `49920` symuluje czytnik w drugiej sali.
+
+## API Kantech
+
+Obie metody pod `/api/kantech/events` wymagają zalogowania przez LDAP i roli administratora w PlanQR. Zaloguj się przez `POST /api/auth/login`, a potem przekazuj otrzymane cookie `jwt` lub nagłówek `Authorization: Bearer <JWT>`.
+
+| Metoda | Wejście | Odpowiedź |
+| --- | --- | --- |
+| `GET /api/kantech/events` | Opcjonalne `readerId` i `limit` od 1 do 100 | JSON z trybem, stanem czytników i zdarzeniami |
+| `POST /api/kantech/events` | Odbicie albo paczka z `readerId`, `state` i `events` | `204` po przyjęciu, `400` dla błędnych danych, `401` lub `403` przy braku uprawnień |
+
+Przykładowe pojedyncze odbicie testowe:
+
+```json
+{
+  "readerId": "49919",
+  "alias": "WISYNC_2",
+  "occurredAt": "2026-11-18T09:00:00Z",
+  "granted": true
+}
+```
+
+Opcjonalny `key` identyfikuje zdarzenie jako 64 znaki szesnastkowe SHA-256. Przy jego braku backend wylicza klucz z treści odbicia. Tryb `observe` służy do obserwacji. Tryb `attendance` zapisuje kwalifikujące się odbicia od `KANTECH_ACTIVE_FROM`.
+
+Proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>`. Fizyczna karta jest wyłącznie danymi zdarzenia. Komunikacja procesu czytnika odbywa się wewnątrz sieci aplikacji.
+
+## Migracje i testy
+
+- Na pustej bazie uruchom `npm run migrate` przed startem backendu.
+- Na odtworzonej bazie sprzed tej zmiany sprawdź schemat względem `202611180001_baseline`. Oznacz ją jako zastosowaną przez `npx prisma migrate resolve --applied 202611180001_baseline` i wykonaj `npm run migrate`. Tabele `tbldydaktyk` i `tbluser` przechowują historyczne dane.
+- `npm test` w `backend/` sprawdza rozliczanie odbić, parsowanie XML i strefę czasową. `npm run test:integration` używa `PLANQR_TEST_POSTGRES_URL` do lokalnej bazy `postgres` z prawem tworzenia tymczasowych baz. Test tworzy osobną bazę, uruchamia symulatory LDAP i Kantecha i usuwa po sobie bazę testową.
+- Test przeglądarkowy włączają `PLANQR_TEST_PLAYWRIGHT` ze ścieżką do `playwright-core` i `PLANQR_TEST_BROWSER` ze ścieżką do Chrome lub Edge. Wcześniej zbuduj frontend przez `npm run build`.
+
+## Pilotaż fizyczny
+
+1. Po przygotowaniu bazy i migracji ustaw w prywatnym `.env` serwera `KANTECH_MODE=observe`, `KANTECH_DOOR_IDS=49919`, adres SmartService, dane konta z uprawnieniem do odczytu i odrębny `WORKER_SECRET_TOKEN`. Zbuduj obrazy poleceniem `docker compose build backend frontend` i uruchom `docker compose --profile kantech up -d`.
+2. Zaloguj się ponownie jako administrator przez LDAP i otwórz `/adminpanel/kantech`. Przy czytniku potwierdź status połączenia i odbicia karty prowadzącego, uczestnika i karty nieprzypisanej. Sprawdź, w którym polu SmartService pojawia się `WISYNC_<numer>`, oraz czy zdarzenia wracają po wznowieniu odczytu. Tryb `observe` wyświetla odbicia bez zapisu obecności.
+3. Przypisz czytnik do potwierdzonego budynku i sali w Planie ZUT. Załaduj identyfikatory kart, loginy i identyfikator Plan ZUT dla prowadzącego przez `npm run attendance:configure -- <plik.json>`. Format pokazuje `local/assignments.json`. Po zaliczeniu obserwacji włącz `KANTECH_MODE=attendance` z `KANTECH_ACTIVE_FROM` ustawionym na początek pilotażu w UTC i sprawdź otwarcie listy, dopisanie uczestnika, zamknięcie i XLSX.

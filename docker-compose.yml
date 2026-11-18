@@ -1,0 +1,68 @@
+services:
+  backend:
+    image: planqr-backend:workspace
+    build:
+      context: ./backend
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${PORT}
+      DISABLE_HTTPS: ${DISABLE_HTTPS}
+      BACKEND_PUBLIC_URL: ${BACKEND_PUBLIC_URL}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      DATABASE_URL: ${DATABASE_URL:?Ustaw DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      ROOT_ADMIN_LOGIN: ${ROOT_ADMIN_LOGIN:-}
+      ROOT_ADMIN_PASSWORD: ${ROOT_ADMIN_PASSWORD:-}
+      LDAP_SYNC_ENABLED: ${LDAP_SYNC_ENABLED:-false}
+      LDAP_SYNC_SEARCH_BASE_DN: ${LDAP_SYNC_SEARCH_BASE_DN:-}
+      LDAP_SYNC_MODE: "${LDAP_SYNC_MODE:-all}"
+      LDAP_SYNC_FULL_FILTER: "${LDAP_SYNC_FULL_FILTER:-(uid=*)}"
+      LDAP_SYNC_FULL_PAGE_SIZE: "${LDAP_SYNC_FULL_PAGE_SIZE:-500}"
+      LDAP_SYNC_FULL_USER_LIMIT: "${LDAP_SYNC_FULL_USER_LIMIT:-0}"
+      LDAP_SYNC_KNOWN_USER_LIMIT: ${LDAP_SYNC_KNOWN_USER_LIMIT:-2000}
+      LDAP_SYNC_BATCH_SIZE: ${LDAP_SYNC_BATCH_SIZE:-50}
+      WORKER_SECRET_TOKEN: ${WORKER_SECRET_TOKEN:-}
+      KANTECH_MODE: ${KANTECH_MODE:-off}
+      KANTECH_ACTIVE_FROM: ${KANTECH_ACTIVE_FROM:-}
+      LDAP_URL: ${LDAP_URL}
+      LDAP_DN: ${LDAP_DN}
+      ZUT_SCHEDULE_STUDENT_URL: ${ZUT_SCHEDULE_STUDENT_URL}
+      ZUT_ATTENDANCE_SCHEDULE_URL: ${ZUT_ATTENDANCE_SCHEDULE_URL:-}
+    expose:
+      - "9099"
+    volumes:
+      - ${PLANQR_CERTS_DIR:-./certs}:/certs:ro
+      - ${PLANQR_UPLOADS_DIR:-./backend/uploads}:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL}
+      ZUT_SCHEDULE_STUDENT_URL: ${ZUT_SCHEDULE_STUDENT_URL}
+      ZUT_SCHEDULE_URL: ${ZUT_SCHEDULE_URL}
+      ZUT_PLAN_BASE_URL: ${ZUT_PLAN_BASE_URL}
+    ports:
+      - "${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_PORT}:443"
+    volumes:
+      - ${PLANQR_CERTS_DIR:-./certs}:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  kantech:
+    profiles: ["kantech"]
+    image: planqr-backend:workspace
+    command: ["node", "dist/attendance/worker.js"]
+    environment:
+      KANTECH_URL: ${KANTECH_URL:-}
+      KANTECH_USER: ${KANTECH_USER:-}
+      KANTECH_PASS: ${KANTECH_PASS:-}
+      KANTECH_DOOR_IDS: ${KANTECH_DOOR_IDS:-49919}
+      KANTECH_POLL_INTERVAL_MS: ${KANTECH_POLL_INTERVAL_MS:-1000}
+      KANTECH_REPORT_URL: http://backend:9099/internal/kantech
+      WORKER_SECRET_TOKEN: ${WORKER_SECRET_TOKEN:-}
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -1,0 +1,30 @@
+services:
+  backend:
+    environment:
+      LDAP_URL: ldap://fixtures:1389
+      LDAP_SYNC_ENABLED: "false"
+      ZUT_ATTENDANCE_SCHEDULE_URL: http://fixtures:8700/schedule_student.php
+    networks:
+      - default
+      - planqr-local
+  kantech:
+    environment:
+      KANTECH_URL: http://fixtures:8700/SmartService
+    depends_on:
+      - fixtures
+  fixtures:
+    image: planqr-backend:workspace
+    command: ["node", "/fixtures/simulator.cjs"]
+    environment:
+      PORT: "8700"
+      HOST: 0.0.0.0
+      LDAP_FIXTURE_PORT: "1389"
+      LDAP_FIXTURE_PASSWORD: ${LDAP_FIXTURE_PASSWORD:-}
+    volumes:
+      - ./local:/fixtures:ro
+    ports:
+      - "127.0.0.1:18700:8700"
+
+networks:
+  planqr-local:
+    external: true

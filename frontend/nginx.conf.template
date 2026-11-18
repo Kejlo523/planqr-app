@@ -1,0 +1,58 @@
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate /etc/nginx/certs/cert.pem;
+    ssl_certificate_key /etc/nginx/certs/cert.key;
+
+    location ^~ /internal/ {
+        return 404;
+    }
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass ${BACKEND_INTERNAL_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location = /status {
+        proxy_pass ${BACKEND_INTERNAL_URL}/status;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location /priority-message-uploads/ {
+        proxy_pass ${BACKEND_INTERNAL_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location /socket.io {
+        proxy_pass ${BACKEND_INTERNAL_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /schedule_student.php {
+        proxy_pass ${ZUT_SCHEDULE_STUDENT_URL};
+        proxy_ssl_server_name on;
+    }
+
+    location /schedule.php {
+        proxy_pass ${ZUT_SCHEDULE_URL};
+        proxy_ssl_server_name on;
+    }
+}

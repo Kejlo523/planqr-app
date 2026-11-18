@@ -1,0 +1,312 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Admin model: if a record exists, the account is an administrator
+model Admin {
+  id          String   @id @default(uuid())
+  username    String   @unique
+  adminSource String   @default("database")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("admins")
+}
+
+model Message {
+  id          Int      @id @default(autoincrement())
+  body        String   // Was content
+  lecturer    String
+  login       String
+  room        String
+  lessonId    Int
+  group       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Kept from previous but optional now
+  validUntil  DateTime? 
+
+  // Room change feature
+  isRoomChange Boolean @default(false)
+  newRoom      String?
+}
+
+model DeviceList {
+  id              Int      @id @default(autoincrement())
+  deviceClassroom String?
+  deviceURL       String?  
+  deviceId        String   @unique // The Client UUID
+  status          String   @default("PENDING") // PENDING, ACTIVE
+  lastSeen        DateTime @default(now())
+  lastIpAddress   String?
+  displayTheme    String   @default("dark")
+  blackScreenMode String   @default("follow")
+
+  // New metadata
+  macAddress      String?
+  viewportWidthPx Int?
+  viewportHeightPx Int?
+  screenWidthPx   Int?
+  screenHeightPx  Int?
+  devicePixelRatio Float?
+  screenOrientation String?
+  displayProfileReportedAt DateTime?
+  priorityMessageAssignment TabletPriorityMessageAssignment?
+  priorityMessageManualAssignment TabletPriorityMessageManualAssignment?
+  priorityMessageScheduleTargets TabletPriorityMessageScheduleTarget[]
+}
+
+model TabletIpBan {
+  id        Int      @id @default(autoincrement())
+  ipAddress String   @unique @map("ip_address")
+  deviceId  String?  @map("device_id")
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+  createdBy String?  @map("created_by")
+
+  @@map("tablet_ip_bans")
+}
+
+model TabletDisplaySettings {
+  id               Int      @id @default(1)
+  nightModeEnabled Boolean  @default(false) @map("night_mode_enabled")
+  nightModeStart   String   @default("22:00") @map("night_mode_start")
+  nightModeEnd     String   @default("06:00") @map("night_mode_end")
+  blackScreenAfterScheduleEnd Boolean @default(false) @map("black_screen_after_schedule_end")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("tablet_display_settings")
+}
+
+model TabletPriorityMessageTemplate {
+  id        String   @id @db.VarChar(80)
+  name      String
+  imageUrl  String   @map("image_url")
+  mediaType String   @default("image") @map("media_type") @db.VarChar(16)
+  isBuiltin Boolean  @default(false) @map("is_builtin")
+  sortOrder Int      @default(100) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  assignments TabletPriorityMessageAssignment[]
+  manualAssignments TabletPriorityMessageManualAssignment[]
+  schedules TabletPriorityMessageSchedule[]
+  presets TabletPriorityMessagePreset[]
+
+  @@map("tablet_priority_message_templates")
+}
+
+model TabletPriorityMessageAssignment {
+  deviceId   Int      @id @map("device_id")
+  templateId String   @map("template_id") @db.VarChar(80)
+  active     Boolean  @default(true)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?  @map("updated_by")
+  scheduleId String?  @map("schedule_id") @db.VarChar(64)
+  priority   Int?
+  sourceMigrated Boolean @default(false) @map("source_migrated")
+  device     DeviceList @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  template   TabletPriorityMessageTemplate @relation(fields: [templateId], references: [id])
+
+  @@index([active], map: "idx_tablet_priority_message_assignments_active")
+  @@map("tablet_priority_message_assignments")
+}
+
+model TabletPriorityMessageManualAssignment {
+  deviceId   Int      @id @map("device_id")
+  templateId String   @map("template_id") @db.VarChar(80)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedBy  String?  @map("updated_by")
+  device     DeviceList @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  template   TabletPriorityMessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("tablet_priority_message_manual_assignments")
+}
+
+model TabletPriorityMessageSchedule {
+  id          String   @id @db.VarChar(64)
+  templateId  String   @map("template_id") @db.VarChar(80)
+  priority    Int
+  targetType  String   @map("target_type") @db.VarChar(16)
+  facultyCode String?  @map("faculty_code") @db.VarChar(32)
+  startsAt    DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt      DateTime @map("ends_at") @db.Timestamptz(6)
+  createdBy   String?  @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  template    TabletPriorityMessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  targets     TabletPriorityMessageScheduleTarget[]
+
+  @@index([startsAt, endsAt], map: "idx_tablet_priority_message_schedules_window")
+  @@index([facultyCode], map: "idx_tablet_priority_message_schedules_faculty")
+  @@map("tablet_priority_message_schedules")
+}
+
+model TabletPriorityMessageScheduleTarget {
+  scheduleId String @map("schedule_id") @db.VarChar(64)
+  deviceId   Int    @map("device_id")
+  schedule   TabletPriorityMessageSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  device     DeviceList @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@id([scheduleId, deviceId])
+  @@index([deviceId], map: "idx_tablet_priority_message_schedule_targets_device")
+  @@map("tablet_priority_message_schedule_targets")
+}
+
+model TabletPriorityMessagePreset {
+  id           String   @id @db.VarChar(64)
+  name         String
+  templateId   String   @map("template_id") @db.VarChar(80)
+  priority     Int
+  durationMode String   @map("duration_mode") @db.VarChar(24)
+  startOffsetDays Int   @default(0) @map("start_offset_days") @db.SmallInt
+  durationDays Int      @default(1) @map("duration_days") @db.SmallInt
+  createdBy    String?  @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  template     TabletPriorityMessageTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("tablet_priority_message_presets")
+}
+
+model TabletPriorityMessagePresetSeedState {
+  id       Int      @id @db.SmallInt
+  seededAt DateTime @default(now()) @map("seeded_at") @db.Timestamptz(6)
+
+  @@map("tablet_priority_message_preset_seed_state")
+}
+
+model LdapUser {
+  username     String    @id
+  displayName  String    @map("display_name")
+  givenName    String?   @map("given_name")
+  surname      String?
+  title        String?
+  email        String?
+  isActive     Int       @default(1) @map("is_active")
+  ldapSyncedAt DateTime? @map("ldap_synced_at") @db.Timestamp(6)
+  createdAt    DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@index([displayName], map: "idx_ldap_users_display_name")
+  @@index([isActive], map: "idx_ldap_users_active")
+  @@map("ldap_users")
+}
+
+model TblDydaktyk {
+  id        Int       @id @default(autoincrement())
+  username  String    @unique(map: "idx_dydaktyk_username_unique")
+  cardHex   String    @map("card_hex")
+  openedAt  DateTime  @map("opened_at") @db.Timestamp(6)
+  closedAt  DateTime? @map("closed_at") @db.Timestamp(6)
+  status    String?
+  isActive  Int       @default(1) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@index([isActive], map: "idx_dydaktyk_active")
+  @@index([username], map: "idx_dydaktyk_username")
+  @@map("tbldydaktyk")
+}
+
+model TblUser {
+  id         Int       @id @default(autoincrement())
+  username   String
+  cardHex    String    @map("card_hex")
+  lastAccess DateTime  @map("last_access") @db.Timestamp(6)
+  status     String?
+  dydaktykId Int?      @map("dydaktyk_id")
+  createdAt  DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt  DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  @@unique([username, cardHex], map: "idx_user_unique")
+  @@index([username], map: "idx_user_username")
+  @@index([cardHex], map: "idx_user_card_hex")
+  @@index([dydaktykId], map: "idx_user_dydaktyk_id")
+  @@map("tbluser")
+}
+
+model AttendanceReader {
+  id         String @id
+  buildingId String
+  roomNumber String
+  label      String
+}
+
+model AttendanceCard {
+  alias      String  @id
+  login      String
+  name       String
+  album      String?
+  scheduleId String?
+}
+
+model AttendanceScan {
+  id             String   @id
+  readerId       String
+  roomKey        String
+  buildingId     String
+  roomNumber     String
+  roomLabel      String
+  alias          String
+  login          String
+  name           String
+  album          String?
+  scheduleId     String?
+  occurredAt     DateTime @db.Timestamptz(3)
+  receivedAt     DateTime @default(now()) @db.Timestamptz(3)
+  candidates     Json?
+  selectedKey    String?
+  retryAt        DateTime? @db.Timestamptz(3)
+  resolution     String   @default("none")
+  outcome        String   @default("received")
+
+  @@index([roomKey, occurredAt, id])
+  @@index([resolution, retryAt])
+  @@index([login, outcome])
+}
+
+model AttendanceSession {
+  id             Int       @id @default(autoincrement())
+  key            String    @unique
+  lessonId       String
+  lessonStart    DateTime  @db.Timestamptz(3)
+  lessonEnd      DateTime  @db.Timestamptz(3)
+  title          String
+  ownerLogin     String
+  ownerName      String
+  roomKey        String
+  readerId       String
+  roomLabel      String
+  openedAt       DateTime  @db.Timestamptz(3)
+  closesAt       DateTime  @db.Timestamptz(3)
+  manualClosedAt DateTime? @db.Timestamptz(3)
+  sentAt         DateTime? @db.Timestamptz(3)
+  voided         Boolean   @default(false)
+  members        AttendanceMember[]
+
+  @@index([roomKey, openedAt])
+  @@index([ownerLogin, lessonId, lessonStart])
+}
+
+model AttendanceMember {
+  id         Int       @id @default(autoincrement())
+  sessionId  Int
+  session    AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  login      String
+  name       String
+  album      String?
+  firstAt    DateTime  @db.Timestamptz(3)
+  lastAt     DateTime  @db.Timestamptz(3)
+  count      Int
+  manual     Boolean   @default(false)
+  removed    Boolean   @default(false)
+
+  @@unique([sessionId, login])
+}

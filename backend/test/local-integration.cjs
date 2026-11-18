@@ -87,6 +87,25 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.equal(search.status(), 200);
         assert.equal((await search.json())[0].id, 'test-teacher');
         const page = await context.newPage();
+        await page.goto(url + '/adminpanel');
+        const gridBody = page.locator('.admin-devices-grid .ag-body-viewport');
+        await gridBody.waitFor({ state: 'attached' });
+        const tabletSelection = page.getByRole('checkbox', { name: /^Zaznacz tablet / });
+        for (const width of [1920, 1440, 1280, 1024, 390]) {
+            await page.setViewportSize({ width, height: 950 });
+            assert.ok((await gridBody.boundingBox())?.height >= 64, 'Tablet grid has room for a row at ' + width + 'px');
+            await tabletSelection.waitFor();
+        }
+        await page.setViewportSize({ width: 1920, height: 950 });
+        const batchActions = page.locator('.admin-devices-view__selection');
+        await batchActions.getByText('Operacje zbiorowe · Zaznaczone: 0').click();
+        const apply = batchActions.getByRole('button', { name: 'Ustaw', exact: true }).first();
+        assert.ok(await apply.isDisabled());
+        await tabletSelection.check();
+        await batchActions.getByText('Operacje zbiorowe · Zaznaczone: 1').waitFor();
+        assert.ok(await apply.isEnabled());
+        await page.setViewportSize({ width: 1200, height: 780 });
+
         await page.goto(url + '/adminpanel/kantech');
         await page.getByRole('heading', { name: 'Kantech na żywo' }).waitFor();
         await page.getByRole('cell', { name: 'Zamknięto listę' }).first().waitFor();
@@ -434,12 +453,16 @@ async function main() {
         assert.equal(chosen.totalPresent, 1);
         assert.equal((await list(9002)).status, 404);
         console.log('Lecturer choice and replay of buffered participants passed.');
-        await browserSmoke(api, simulator, ldapPassword, directory);
 
         const tablet = await request(api + '/api/devices', {
             headers, json: { deviceId: randomUUID(), deviceClassroom: 'TEST 201' },
         });
         assert.equal(tablet.status, 201);
+        const { id: tabletId } = await tablet.json();
+        assert.equal((await request(api + '/api/devices/' + tabletId, {
+            headers, method: 'PUT', json: { status: 'ACTIVE' },
+        })).status, 204);
+        await browserSmoke(api, simulator, ldapPassword, directory);
         const count = await (await request(api + '/status')).json();
         assert.ok(count.total >= 1);
         const upload = await request(api + '/api/devices/priority-messages/upload', {

@@ -152,9 +152,6 @@ export default function LoginPanel() {
       <aside className="login-panel__introduction">
         <div className="login-panel__institution">Zachodniopomorski Uniwersytet Technologiczny w Szczecinie</div>
         <p className="login-panel__statement">Plan zajęć.<br />Sale i obecność.</p>
-        <div className="login-panel__timetable" aria-hidden="true">
-          <span /><span /><span /><span /><span />
-        </div>
       </aside>
       <section className="login-panel__workspace">
         <header className="login-panel__bar">
@@ -179,7 +176,7 @@ export default function LoginPanel() {
               autoComplete="username"
               autoCapitalize="none"
               spellCheck={false}
-              placeholder="Twój login"
+              placeholder="Login lub adres e-mail"
               required
               value={login}
               onChange={(event) => setLogin(event.target.value)}

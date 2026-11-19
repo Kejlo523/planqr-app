@@ -77,16 +77,23 @@ async function browserSmoke(api, simulator, password, directory) {
     await waitFor('frontend preview', async () => (await request(url + '/')).ok);
     const browser = await require(playwright).chromium.launch({ executablePath, headless: true });
     try {
-        const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1200, height: 780 } });
+        const context = await browser.newContext({ acceptDownloads: true, colorScheme: 'dark', viewport: { width: 1200, height: 780 } });
         await context.addInitScript((url) => {
             window.__APP_CONFIG__ = { ZUT_PLAN_BASE_URL: url };
         }, simulator);
-        const login = await context.request.post(url + '/api/auth/login', { data: { username: 'pilot-admin', password } });
+        const page = await context.newPage();
+        await page.goto(url + '/');
+        await page.getByLabel('Login uczelniany').fill('pilot-admin@zut.edu.pl');
+        await page.getByLabel('Hasło').fill(password);
+        const loginResponse = page.waitForResponse((response) => response.url() === url + '/api/auth/login');
+        await page.getByRole('button', { name: 'Zaloguj', exact: true }).click();
+        const login = await loginResponse;
         assert.equal(login.status(), 200);
+        assert.equal((await login.json()).login, 'pilot-admin');
+        await page.waitForURL(url + '/lecturerPlan');
         const search = await context.request.get(url + '/schedule.php?kind=teacher&query=Prowadzacy');
         assert.equal(search.status(), 200);
         assert.equal((await search.json())[0].id, 'test-teacher');
-        const page = await context.newPage();
         await page.goto(url + '/adminpanel');
         const gridBody = page.locator('.admin-devices-grid .ag-body-viewport');
         await gridBody.waitFor({ state: 'attached' });
@@ -106,8 +113,14 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.ok(await apply.isEnabled());
         await page.setViewportSize({ width: 1200, height: 780 });
 
-        await page.goto(url + '/adminpanel/kantech');
+        const cardId = '04:51:07:da:00:11';
+        const scan = await context.request.post(url + '/api/kantech/events', {
+            data: { readerId: '49920', alias: cardId, occurredAt: new Date().toISOString(), granted: false },
+        });
+        assert.equal(scan.status(), 204);
+        await page.getByRole('link', { name: 'Kantech', exact: true }).click();
         await page.getByRole('heading', { name: 'Kantech na żywo' }).waitFor();
+        await page.getByRole('cell', { name: cardId, exact: true }).waitFor();
         await page.getByRole('cell', { name: 'Zamknięto listę' }).first().waitFor();
         const screenshots = process.env.PLANQR_TEST_SCREENSHOTS;
         if (screenshots) {
@@ -223,9 +236,11 @@ async function main() {
         throw new Error('PLANQR_TEST_POSTGRES_URL must point to postgres on the local machine');
     }
     const name = 'planqr_test_' + randomBytes(6).toString('hex');
+    const workerRole = name + '_kantech';
     const sql = new Client({ connectionString: adminDb.href });
     const directory = await mkdtemp(join(tmpdir(), 'planqr-integration-'));
     let created = false;
+    let workerRoleCreated = false;
     await sql.connect();
     try {
         await sql.query('CREATE DATABASE ' + name);
@@ -242,6 +257,7 @@ async function main() {
             ...process.env,
             NODE_ENV: 'test', PORT: String(backendPort), BACKEND_BIND_IP: '127.0.0.1',
             DISABLE_HTTPS: 'true', DEV_AUTH_BYPASS: 'false',
+            KANTECH_TRANSPORT: 'http',
             KANTECH_DEV_TOOLS: 'true',
             KANTECH_DOOR_IDS: '49919,49920',
             BACKEND_PUBLIC_URL: api, CORS_ORIGIN: api, DATABASE_URL: database.href,
@@ -294,7 +310,10 @@ async function main() {
         const lecturer = credentials('lecturer-two', 'teacher');
         let server = startBackend('observe');
         let worker = launch('dist/attendance/worker.js', buttons.worker);
-        let headers = await authenticate();
+        let headers = await authenticate(' pilot-admin @zut.edu.pl ');
+        assert.equal((await request(api + '/api/auth/login', {
+            json: { username: '@zut.edu.pl', password: ldapPassword },
+        })).status, 400);
         const readersApi = api + '/api/kantech/readers';
         const workerReaders = api + '/internal/kantech/readers';
         const service = { Authorization: 'Bearer ' + common.WORKER_SECRET_TOKEN };
@@ -315,6 +334,7 @@ async function main() {
         await emit('WISYNC_1', at(-172_800));
         await waitFor('visible observation', async () => (await live()).events.some((event) => event.outcome === 'observed'));
         assert.equal((await list(9001)).status, 404);
+        assert.equal((await request(api + '/api/kantech/events')).status, 401);
         assert.equal((await request(api + '/api/kantech/events', { headers: student })).status, 403);
         assert.equal((await request(api + '/api/kantech/events', { json: {} })).status, 401);
         assert.equal((await request(api + '/internal/kantech', { json: {} })).status, 401);
@@ -347,7 +367,9 @@ async function main() {
         })).status, 204);
         const observed = await (await request(dev, { headers })).json();
         assert.ok(observed.observed.some((item) => item.alias === 'wi_sync12' && item.canonicalAlias === 'WISYNC_12'));
-        assert.ok((await live()).events.every((item) => !('sourceAlias' in item)));
+        const recentEvents = (await live()).events;
+        assert.ok(recentEvents.some((item) => item.label === 'wi_sync12'));
+        assert.ok(recentEvents.every((item) => !('sourceAlias' in item)));
         const mapping = await request(dev + '/cards', {
             headers, json: { alias: 'wi_sync12', role: 'participant', target: '654321' },
         });
@@ -410,7 +432,7 @@ async function main() {
         assert.equal((await request(api + '/api/attendance/sessions/' + opened.sessionId + '/close', {
             json: {}, headers: lecturer,
         })).status, 404);
-        assert.ok((await live()).events.some((item) => item.outcome === 'unknown_card' && !item.label.startsWith('WISYNC_')));
+        assert.ok((await live()).events.some((item) => item.outcome === 'unknown_card' && item.label === 'WISYNC_999'));
         console.log('30-minute boundary, recovery after schedule failure, isolation by room, deduplication and owner access passed.');
 
         await emit('WISYNC_1', at(-90));
@@ -527,6 +549,63 @@ async function main() {
         }
         console.log('Audit access, useful events, pagination, scan exclusion and automatic retention passed.');
 
+        await Promise.all([stop(server), stop(worker)]);
+        const workerPassword = secret();
+        // The role name and password contain only generated hexadecimal characters and fixed prefixes.
+        await sql.query(`CREATE ROLE ${workerRole} LOGIN PASSWORD '${workerPassword}'`);
+        workerRoleCreated = true;
+        const directUrl = new URL(database.href);
+        directUrl.username = workerRole;
+        directUrl.password = workerPassword;
+        const readingsSql = new Client({ connectionString: database.href });
+        await readingsSql.connect();
+        try {
+            await readingsSql.query(`
+                GRANT USAGE ON SCHEMA public TO ${workerRole};
+                GRANT SELECT (id) ON "AttendanceReader" TO ${workerRole};
+                GRANT INSERT ON "KantechEvent" TO ${workerRole};
+                GRANT SELECT, INSERT, UPDATE ON "KantechReaderStatus" TO ${workerRole};
+            `);
+            assert.ok((await request(simulator + '/test/schedule', { json: [event(9100, -30, 2_100)] })).ok);
+            await emit('WISYNC_1', at(-12));
+            await emit('WISYNC_3', at(-10));
+            const unassignedAlias = 'WISYNC_8722';
+            await emit(unassignedAlias, at(-8));
+            const launchDirectWorker = () => launch('dist/attendance/worker.js', {
+                ...buttons.worker, KANTECH_TRANSPORT: 'postgres', KANTECH_MODE: 'attendance',
+                KANTECH_DATABASE_URL: directUrl.href, KANTECH_REPORT_URL: '', WORKER_SECRET_TOKEN: '', DATABASE_URL: '',
+            });
+            const rawReadings = () => readingsSql.query('SELECT id, outcome, "captureMode" FROM "KantechReadings" WHERE alias = $1',
+                [unassignedAlias]);
+            worker = launchDirectWorker();
+            const raw = await waitFor('raw SQL reading with PlanQR API stopped', async () => (await rawReadings()).rows[0]);
+            assert.equal(raw.outcome, 'received');
+            assert.equal(raw.captureMode, 'attendance');
+            const checked = await readingsSql.query('SELECT "checkedAt" FROM "KantechReaderStatus" WHERE "readerId" = $1', ['49919']);
+            const beforeWorkerRestart = checked.rows[0].checkedAt;
+            await stop(worker);
+            worker = launchDirectWorker();
+            await waitFor('DB worker replay and new heartbeat', async () => {
+                const { rows } = await readingsSql.query('SELECT "checkedAt" FROM "KantechReaderStatus" WHERE "readerId" = $1', ['49919']);
+                return rows[0]?.checkedAt > beforeWorkerRestart;
+            });
+            assert.equal((await rawReadings()).rowCount, 1);
+
+            server = startBackend('attendance');
+            headers = await authenticate();
+            await waitFor('queued attendance after backend restart', async () => {
+                const response = await list(9100);
+                return response.ok && (await response.json()).totalPresent === 1;
+            });
+            const classified = (await rawReadings()).rows[0];
+            assert.equal(classified.outcome, 'unknown_card');
+            assert.ok((await live()).events.some(({ key, label, outcome }) =>
+                key === raw.id && label === unassignedAlias && outcome === classified.outcome));
+        } finally {
+            await readingsSql.end();
+        }
+        console.log('Restricted PostgreSQL worker, SQL readings during API downtime, deduplication and attendance recovery passed.');
+
         for (const id of ['49919', '49920']) {
             assert.equal((await request(readersApi + '/' + id, { headers, method: 'DELETE' })).status, 204);
         }
@@ -540,6 +619,7 @@ async function main() {
     } finally {
         await Promise.all([...processes].map(stop));
         if (created) await sql.query('DROP DATABASE ' + name + ' WITH (FORCE)');
+        if (workerRoleCreated) await sql.query('DROP ROLE ' + workerRole);
         await sql.end();
         await rm(directory, { recursive: true, force: true });
     }

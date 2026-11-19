@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { normalizeCardAlias } from './cardAlias';
 
 export const incomingScan = z.object({
     key: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     readerId: z.string().trim().min(1).max(64),
-    alias: z.string().trim().min(1).max(128),
+    alias: z.string().trim().min(1).max(128).refine((alias) => !alias.includes('\0')),
     occurredAt: z.string().datetime({ offset: true }).transform((value) => new Date(value).toISOString()).nullable(),
     granted: z.boolean(),
 }).transform((scan) => ({
@@ -32,61 +33,38 @@ interface MonitorEvent {
     key: string;
     readerId: string;
     label: string;
-    occurredAt: string | null;
-    receivedAt: string;
+    occurredAt: Date | null;
+    receivedAt: Date;
     outcome: string;
-    sourceAlias: string;
 }
 
-const events = new Map<string, MonitorEvent>();
-const readers = new Map<string, { state: 'connected' | 'unavailable'; checkedAt: string }>();
-
-export function reportReader(readerId: string, state: 'connected' | 'unavailable') {
-    readers.set(readerId, { state, checkedAt: new Date().toISOString() });
-}
-
-export function forgetReader(readerId: string) {
-    readers.delete(readerId);
-}
-
-export function reportScan(scan: IncomingScan, outcome: string, assigned = false) {
-    const existing = events.get(scan.key);
-    if (existing) return;
-    const normalized = normalizeCardAlias(scan.alias);
-    const label = assigned && /^WISYNC_[0-9]+$/.test(normalized)
-        ? normalized
-        : '••••' + normalized.slice(-4);
-    events.set(scan.key, {
-        key: scan.key, readerId: scan.readerId, label,
-        occurredAt: scan.occurredAt, receivedAt: new Date().toISOString(), outcome,
-        sourceAlias: scan.alias,
-    });
-    const oldest = events.keys().next().value;
-    if (events.size > 100 && oldest) events.delete(oldest);
-}
-
-export function updateScanOutcome(key: string, outcome: string) {
-    const event = events.get(key);
-    if (event) event.outcome = outcome;
-}
-
-export function getMonitor(readerId?: string, limit = 100) {
+export async function getMonitor(database: PrismaClient, readerId?: string, limit = 100) {
+    const [readers, events] = await Promise.all([
+        database.kantechReaderStatus.findMany({ where: { readerId }, orderBy: { readerId: 'asc' } }),
+        database.$queryRaw<MonitorEvent[]>`
+            SELECT id AS key, alias AS label, "readerId", "occurredAt", "receivedAt", outcome
+            FROM "KantechReadings"
+            ${readerId === undefined ? Prisma.empty : Prisma.sql`WHERE "readerId" = ${readerId}`}
+            ORDER BY "receivedAt" DESC, id DESC LIMIT ${limit}
+        `,
+    ]);
     return {
-        readers: Array.from(readers, ([id, info]) => ({ id, ...info }))
-            .filter(({ id }) => !readerId || id === readerId),
-        events: [...events.values()].reverse()
-            .filter((event) => !readerId || event.readerId === readerId).slice(0, limit)
-            .map(({ sourceAlias: _sourceAlias, ...event }) => event),
+        readers: readers.map(({ readerId: id, ...status }) => ({ id, ...status })),
+        events,
     };
 }
 
-export function getObservedAliases() {
-    const recent = new Map<string, { alias: string; canonicalAlias: string; readerId: string; receivedAt: string }>();
-    for (const { sourceAlias, readerId, receivedAt } of [...events.values()].reverse()) {
-        if (/^(?:[0-9a-f]{2,}:)+[0-9a-f]{2,}$/i.test(sourceAlias)) continue;
-        const key = JSON.stringify([readerId, sourceAlias]);
+export async function getObservedAliases(database: PrismaClient) {
+    const events = await database.kantechEvent.findMany({
+        orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }], take: 100,
+        select: { alias: true, readerId: true, receivedAt: true },
+    });
+    const recent = new Map<string, typeof events[number] & { canonicalAlias: string }>();
+    for (const event of events) {
+        if (/^(?:[0-9a-f]{2,}:)+[0-9a-f]{2,}$/i.test(event.alias)) continue;
+        const key = JSON.stringify([event.readerId, event.alias]);
         if (!recent.has(key)) {
-            recent.set(key, { alias: sourceAlias, canonicalAlias: normalizeCardAlias(sourceAlias), readerId, receivedAt });
+            recent.set(key, { ...event, canonicalAlias: normalizeCardAlias(event.alias) });
         }
     }
     return [...recent.values()].slice(0, 20);

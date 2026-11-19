@@ -1,6 +1,5 @@
-import { AttendanceScan, Prisma, PrismaClient } from '@prisma/client';
+import { AttendanceScan, KantechEvent, Prisma, PrismaClient } from '@prisma/client';
 import { env } from '../config/env';
-import { IncomingScan, reportScan, updateScanOutcome } from './monitor';
 import { findLessons, getRoomKey } from './schedule';
 import { buildTimeline, Lesson, lessonSchema } from './timeline';
 import { cardAliasKeys } from './cardAlias';
@@ -77,58 +76,88 @@ export async function projectRoom(tx: Prisma.TransactionClient, roomKey: string)
             }
         }
     }
-    return outcomes;
 }
 
-export function publishOutcomes(outcomes?: Map<string, string>) {
-    outcomes?.forEach((outcome, id) => updateScanOutcome(id, outcome));
-}
-
-export async function ingestScans(readerId: string, events: IncomingScan[]) {
-    if (!events.length) return;
+async function ingestScans(tx: Prisma.TransactionClient, readerId: string, events: KantechEvent[]) {
     const [reader, assignments] = await Promise.all([
-        attendanceDb.attendanceReader.findUnique({ where: { id: readerId } }),
-        attendanceDb.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
+        tx.attendanceReader.findUnique({ where: { id: readerId } }),
+        tx.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
     ]);
     const roomKey = reader?.buildingId && reader.roomNumber ? getRoomKey(reader.buildingId, reader.roomNumber) : '';
     const cards = new Map(assignments.map((card) => [card.alias, card]));
-    const valid: IncomingScan[] = [];
+    const results = new Map<string, string[]>();
     const data: Prisma.AttendanceScanCreateManyInput[] = [];
+    const cutover = env.KANTECH_ACTIVE_FROM ? new Date(env.KANTECH_ACTIVE_FROM).getTime() : Infinity;
     for (const event of events) {
         const card = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
-        const occurredAt = event.occurredAt ? new Date(event.occurredAt) : null;
+        const { occurredAt } = event;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
             : !event.granted ? 'access_denied' : !card ? 'unknown_card'
-            : !roomKey && env.KANTECH_MODE === 'attendance' ? 'reader_without_room' : null;
-        if (!reader || !card || !occurredAt || invalid || env.KANTECH_MODE === 'observe') {
-            reportScan(event, invalid ?? 'observed', Boolean(card));
-            continue;
+            : !roomKey && event.captureMode === 'attendance' ? 'reader_without_room' : null;
+        let outcome = invalid ?? 'observed';
+        if (reader && card && occurredAt && !invalid && event.captureMode === 'attendance') {
+            outcome = 'outside_cutover';
+            if (+occurredAt >= cutover && +occurredAt <= Date.now() + 60_000) {
+                outcome = 'received';
+                data.push({
+                    id: event.id, readerId, roomKey, buildingId: reader.buildingId, roomNumber: reader.roomNumber,
+                    roomLabel: reader.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
+                    scheduleId: card.scheduleId, occurredAt, receivedAt: event.receivedAt,
+                    resolution: card.scheduleId ? 'pending' : 'none', retryAt: card.scheduleId ? new Date() : null,
+                });
+            }
         }
-        if (occurredAt < new Date(env.KANTECH_ACTIVE_FROM!) || occurredAt.getTime() > Date.now() + 60_000) {
-            reportScan(event, 'outside_cutover', true);
-            continue;
-        }
-        valid.push(event);
-        data.push({
-            id: event.key, readerId, roomKey, buildingId: reader.buildingId, roomNumber: reader.roomNumber,
-            roomLabel: reader.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
-            scheduleId: card.scheduleId, occurredAt, resolution: card.scheduleId ? 'pending' : 'none',
-            retryAt: card.scheduleId ? new Date() : null,
-        });
+        const ids = results.get(outcome) ?? [];
+        ids.push(event.id);
+        results.set(outcome, ids);
     }
-    if (!data.length) return;
-    const outcomes = await attendanceDb.$transaction(async (tx) => {
+    if (data.length) {
         await lockRoom(tx, roomKey);
         const result = await tx.attendanceScan.createMany({ data, skipDuplicates: true });
-        if (result.count) return projectRoom(tx, roomKey);
-        const stored = await tx.attendanceScan.findMany({
-            where: { id: { in: data.map((scan) => scan.id) } },
-            select: { id: true, outcome: true },
-        });
-        return new Map(stored.map((scan) => [scan.id, scan.outcome]));
+        if (result.count) await projectRoom(tx, roomKey);
+    }
+    for (const [outcome, ids] of results) {
+        await tx.kantechEvent.updateMany({ where: { id: { in: ids } }, data: { outcome } });
+    }
+}
+
+function processKantechBatch() {
+    const captureModes = env.KANTECH_MODE === 'attendance' ? ['observe', 'attendance'] : ['observe'];
+    const pending = Prisma.sql`"outcome" IS NULL AND "captureMode" IN (${Prisma.join(captureModes)})`;
+    return attendanceDb.$transaction(async (tx) => {
+        const events = await tx.$queryRaw<KantechEvent[]>`
+            SELECT * FROM "KantechEvent" WHERE ${pending} AND "readerId" = (
+                SELECT "readerId" FROM "KantechEvent" WHERE ${pending} ORDER BY "receivedAt", id LIMIT 1
+            ) ORDER BY "receivedAt", id LIMIT 75 FOR UPDATE SKIP LOCKED
+        `;
+        if (!events.length) return false;
+        await ingestScans(tx, events[0].readerId, events);
+        return true;
     }, transactionOptions);
-    for (const event of valid) reportScan(event, outcomes.get(event.key) ?? 'received', true);
-    publishOutcomes(outcomes);
+}
+
+export function startKantechIngestionJob() {
+    if (env.KANTECH_MODE === 'off') return;
+    let working = false;
+    let cleanupAt = 0;
+    setInterval(async () => {
+        if (working) return;
+        working = true;
+        try {
+            for (let batch = 0; batch < 5; batch += 1) {
+                if (!await processKantechBatch()) break;
+            }
+            if (Date.now() >= cleanupAt) {
+                cleanupAt = Date.now() + 60 * 60 * 1000;
+                const receivedAt = { lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) };
+                await attendanceDb.kantechEvent.deleteMany({ where: { receivedAt, outcome: { not: null } } });
+            }
+        } catch {
+            console.error('[Kantech] Could not process the reading queue.');
+        } finally {
+            working = false;
+        }
+    }, 1_000).unref();
 }
 
 export async function resolvePendingScans() {
@@ -150,16 +179,15 @@ export async function resolvePendingScans() {
             continue;
         }
         const resolution = candidates.length > 1 ? 'choose_lesson' : candidates.length ? 'matched' : 'no_match';
-        const outcomes = await attendanceDb.$transaction(async (tx) => {
+        await attendanceDb.$transaction(async (tx) => {
             await lockRoom(tx, scan.roomKey);
             const updated = await tx.attendanceScan.updateMany({
                 where: { id: scan.id, resolution: 'pending' },
                 data: { resolution, candidates, retryAt: null },
             });
             if (!updated.count) return;
-            return projectRoom(tx, scan.roomKey);
+            await projectRoom(tx, scan.roomKey);
         }, transactionOptions);
-        publishOutcomes(outcomes);
     }
 }
 

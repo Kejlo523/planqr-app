@@ -47,11 +47,12 @@ const api = (handler: (req: AuthRequest, res: Response) => Promise<void>) =>
     };
 
 kantechDevRoutes.get('/', api(async (req, res) => {
-    const [cards, readers] = await Promise.all([
+    const [cards, readers, observed] = await Promise.all([
         attendanceDb.attendanceCard.findMany({ orderBy: { alias: 'asc' } }),
         listReaders(),
+        getObservedAliases(attendanceDb),
     ]);
-    res.json({ cards, readers, observed: getObservedAliases(), simulated: getSimulation(owner(req)) });
+    res.json({ cards, readers, observed, simulated: getSimulation(owner(req)) });
 }));
 
 kantechDevRoutes.post('/cards', auditAction('KANTECH', 'Zapisano przypisanie karty'), api(async (req, res) => {

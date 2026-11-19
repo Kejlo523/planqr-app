@@ -59,6 +59,7 @@ const envSchema = z.object({
     ),
     WORKER_SECRET_TOKEN: z.string().optional(),
     KANTECH_MODE: z.enum(["off", "observe", "attendance"]).default("off"),
+    KANTECH_TRANSPORT: z.enum(["http", "postgres"]).default("http"),
     KANTECH_DEV_TOOLS: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
     KANTECH_DOOR_IDS: z.string().default("").transform((value) =>
         [...new Set(value.split(",").map((id) => id.trim()).filter(Boolean))],
@@ -68,7 +69,7 @@ const envSchema = z.object({
         z.string().datetime().optional(),
     ),
 }).superRefine((value, ctx) => {
-    if (value.KANTECH_MODE !== "off" && !value.WORKER_SECRET_TOKEN) {
+    if (value.KANTECH_MODE !== "off" && value.KANTECH_TRANSPORT === "http" && !value.WORKER_SECRET_TOKEN) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["WORKER_SECRET_TOKEN"], message: "Kantech needs a worker token" });
     }
     if (value.KANTECH_MODE === "attendance" && !value.KANTECH_ACTIVE_FROM) {

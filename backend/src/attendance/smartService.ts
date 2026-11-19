@@ -57,7 +57,7 @@ export function parseReaderSnapshot(text: string, readerId: string): IncomingSca
         if (!match) continue;
         const [, date, time, status, card, identity] = match;
         const alias = identity;
-        if (alias.length > 128) continue;
+        if (alias.length > 128 || alias.includes('\0')) continue;
         const occurredAt = parseCampusTime(date + 'T' + time)?.toISOString() ?? null;
         // SmartService snapshot keys can depend on the response. Use the event content until the hardware pilot verifies them.
         const key = createHash('sha256').update(JSON.stringify([

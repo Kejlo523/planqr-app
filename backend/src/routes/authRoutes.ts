@@ -19,6 +19,7 @@ const router = Router();
  *             properties:
  *               username:
  *                 type: string
+ *                 description: Account name or email address. Only the part before the first @ is used.
  *               password:
  *                 type: string
  *     responses:

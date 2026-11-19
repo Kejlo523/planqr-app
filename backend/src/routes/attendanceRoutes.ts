@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AuthRequest, requireLecturerAccess } from '../middlewares/authMiddleware';
 import { CAMPUS_ZONE } from '../attendance/scheduleTime';
 import {
-    attendanceDb, lockRoom, projectRoom, publishOutcomes, readCandidates,
+    attendanceDb, lockRoom, projectRoom, readCandidates,
 } from '../attendance/store';
 
 const router = Router();
@@ -156,7 +156,7 @@ router.get('/pending', handle(async (req, res) => {
 router.post('/pending/:id/choose', auditAction('ATTENDANCE', 'Wybrano zajęcia dla listy obecności', () => undefined), handle(async (req, res) => {
     const key = z.string().min(1).max(400).parse(req.body?.key);
     const where = { id: req.params.id, login: owner(req).ownerLogin };
-    const outcomes = await attendanceDb.$transaction(async (tx) => {
+    await attendanceDb.$transaction(async (tx) => {
         const found = await tx.attendanceScan.findFirst({ where, select: { roomKey: true } });
         if (!found) throw new RequestError(404, 'Pending scan not found');
         await lockRoom(tx, found.roomKey);
@@ -167,22 +167,20 @@ router.post('/pending/:id/choose', auditAction('ATTENDANCE', 'Wybrano zajęcia d
             throw new RequestError(400, 'Lesson is not a candidate for this scan');
         }
         await tx.attendanceScan.update({ where: { id: scan.id }, data: { selectedKey: key } });
-        return projectRoom(tx, scan.roomKey);
+        await projectRoom(tx, scan.roomKey);
     }, { timeout: 20_000 });
-    publishOutcomes(outcomes);
     res.sendStatus(204);
 }));
 
 router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę obecności'), handle(async (req, res) => {
-    const outcomes = await editSession(req, async (tx, session) => {
+    await editSession(req, async (tx, session) => {
         const now = new Date();
         if (session.closesAt <= now) return;
         await tx.attendanceSession.update({
             where: { id: session.id }, data: { manualClosedAt: now },
         });
-        return projectRoom(tx, session.roomKey);
+        await projectRoom(tx, session.roomKey);
     });
-    publishOutcomes(outcomes);
     const session = await attendanceDb.attendanceSession.findFirst({
         where: { ...owner(req), id: idSchema.parse(req.params.id) }, include: members,
     });

@@ -3,8 +3,9 @@ import { auditAction } from '../middlewares/auditMiddleware';
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
-import { forgetReader, getMonitor, incomingReport, reportReader } from '../attendance/monitor';
-import { attendanceDb, ingestScans } from '../attendance/store';
+import { getMonitor, incomingReport } from '../attendance/monitor';
+import { saveReaderReport } from '../attendance/reports';
+import { attendanceDb } from '../attendance/store';
 import { ensureReaderSetup, listReaders, readerIdSchema, readerInput } from '../attendance/readers';
 import { attendanceScanRateLimiter } from '../middlewares/securityMiddleware';
 import { requireLdapAdmin } from '../middlewares/authMiddleware';
@@ -30,7 +31,7 @@ const query = z.object({
  *       - { name: readerId, in: query, schema: { type: string } }
  *       - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
  *     responses:
- *       200: { description: Mode, readers, and masked recent events }
+ *       200: { description: 'Mode, readers, and recent events with full card identifiers in label' }
  *       401: { description: Sign-in required }
  *       403: { description: LDAP administrator required }
  *   post:
@@ -49,14 +50,19 @@ const query = z.object({
  *       401: { description: Sign-in required }
  *       403: { description: LDAP administrator required }
  */
-kantechEvents.get('/', requireLdapAdmin, (req, res) => {
+kantechEvents.get('/', requireLdapAdmin, async (req, res) => {
     const parsed = query.safeParse(req.query);
     if (!parsed.success) {
         res.status(400).json({ message: 'Invalid event filters' });
         return;
     }
     res.set('Cache-Control', 'no-store');
-    res.json({ mode: env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...getMonitor(parsed.data.readerId, parsed.data.limit) });
+    try {
+        const monitor = await getMonitor(attendanceDb, parsed.data.readerId, parsed.data.limit);
+        res.json({ mode: env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...monitor });
+    } catch {
+        res.status(503).json({ message: 'Reader monitor unavailable' });
+    }
 });
 
 async function acceptReport(req: Request, res: Response, worker = false) {
@@ -70,14 +76,7 @@ async function acceptReport(req: Request, res: Response, worker = false) {
         return;
     }
     try {
-        if (worker && !await attendanceDb.attendanceReader.findUnique({
-            where: { id: report.data.readerId }, select: { id: true },
-        })) {
-            res.sendStatus(204);
-            return;
-        }
-        reportReader(report.data.readerId, report.data.state);
-        await ingestScans(report.data.readerId, report.data.events);
+        await saveReaderReport(attendanceDb, report.data, env.KANTECH_MODE, worker);
         res.sendStatus(204);
     } catch {
         res.status(503).json({ message: 'Reader report could not be stored' });
@@ -148,7 +147,6 @@ kantechReaders.delete('/:id', auditAction('KANTECH', 'Usunięto czytnik'), async
     try {
         await ensureReaderSetup();
         await attendanceDb.attendanceReader.deleteMany({ where: { id: id.data } });
-        forgetReader(id.data);
         res.sendStatus(204);
     } catch {
         res.status(503).json({ message: 'Nie udało się usunąć czytnika.' });

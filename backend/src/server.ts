@@ -23,7 +23,8 @@ import { startLdapUserSyncJob } from "./jobs/ldapUserSyncJob";
 import { startPriorityMessageScheduleJob } from "./jobs/priorityMessageScheduleJob";
 import { kantechEvents, kantechIngress, kantechReaders } from './routes/kantechRoutes';
 import { kantechDevRoutes } from './routes/kantechDevRoutes';
-import { startAttendanceJob } from './attendance/store';
+import { startAttendanceJob, startKantechIngestionJob } from './attendance/store';
+import { ensureReaderSetup } from './attendance/readers';
 import { startAuditCleanup } from './services/auditLogService';
 
 
@@ -116,6 +117,10 @@ const startCleanupJob = () => {
 startCleanupJob();
 startLdapUserSyncJob();
 startPriorityMessageScheduleJob();
+if (env.KANTECH_MODE !== 'off') {
+    void ensureReaderSetup().catch(() => console.error('[Kantech] Could not initialize readers.'));
+}
+startKantechIngestionJob();
 startAttendanceJob();
 startAuditCleanup();
 

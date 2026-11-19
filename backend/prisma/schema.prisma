@@ -237,10 +237,33 @@ model AttendanceReader {
   buildingId String
   roomNumber String
   label      String
+  kantechStatus KantechReaderStatus?
 }
 
 model KantechReaderSetup {
   id Int @id
+}
+
+model KantechReaderStatus {
+  readerId  String   @id
+  reader    AttendanceReader @relation(fields: [readerId], references: [id], onDelete: Cascade)
+  state     String
+  checkedAt DateTime @db.Timestamptz(3)
+}
+
+model KantechEvent {
+  id          String   @id
+  readerId    String
+  alias       String
+  granted     Boolean
+  occurredAt  DateTime? @db.Timestamptz(3)
+  receivedAt  DateTime @default(now()) @db.Timestamptz(3)
+  captureMode String
+  outcome     String?
+
+  @@index([receivedAt, id])
+  @@index([readerId, receivedAt, id])
+  @@index([outcome, receivedAt, id])
 }
 
 enum AuditCategory {

@@ -56,11 +56,35 @@ Przykładowe pojedyncze odbicie testowe:
 
 Opcjonalny `key` identyfikuje zdarzenie jako 64 znaki szesnastkowe SHA-256. Przy jego braku backend wylicza klucz z treści odbicia. Tryb `observe` służy do obserwacji. Tryb `attendance` zapisuje kwalifikujące się odbicia od `KANTECH_ACTIVE_FROM`.
 
-Proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>`. Fizyczna karta jest wyłącznie danymi zdarzenia. Komunikacja procesu czytnika odbywa się wewnątrz sieci aplikacji.
+W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>` i odświeża listę przez `GET /internal/kantech/readers`.
 
 Administrator LDAP może dodawać, edytować i usuwać czytniki w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. `GET /api/kantech/readers` zwraca listę, `POST /api/kantech/readers` zapisuje `id`, `label`, `buildingId` i `roomNumber`, a `DELETE /api/kantech/readers/:id` usuwa konfigurację. Budynek i sala są potrzebne do zapisu obecności.
 
-Proces odświeża listę przez wewnętrzne `GET /internal/kantech/readers`. Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu, jeśli baza nie ma jeszcze zapisanych czytników.
+Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu backendu, jeśli baza nie ma jeszcze zapisanych czytników.
+
+### Połączenie workera z PostgreSQL
+
+Ustaw `KANTECH_TRANSPORT=postgres` i `KANTECH_DATABASE_URL` w prywatnym `.env`. Po migracji i zapisaniu czytników worker pobiera ich konfigurację z PostgreSQL oraz zapisuje odczyty i stan czytników bez połączenia z API PlanQR. Źródłem zdarzeń nadal jest SmartService. Backend po uruchomieniu przetwarza kolejkę według trybu z chwili odbioru. Odbicia w trybie `observe` służą do podglądu, a zdarzenia z trybu `attendance` czekają na backend działający w tym trybie.
+
+Nadaj osobnemu użytkownikowi workera dostęp do bazy PlanQR i poniższe uprawnienia po migracji. W lokalnym Compose tryb `postgres` domyślnie korzysta z połączenia do bazy testowej.
+
+```sql
+GRANT USAGE ON SCHEMA public TO planqr_kantech;
+GRANT SELECT (id) ON "AttendanceReader" TO planqr_kantech;
+GRANT INSERT ON "KantechEvent" TO planqr_kantech;
+GRANT SELECT, INSERT, UPDATE ON "KantechReaderStatus" TO planqr_kantech;
+```
+
+Panel Kantecha i raport odczytują te same dane. Kontu raportowemu wystarczy `USAGE` na schemacie i `SELECT` na widoku `"KantechReadings"`.
+
+```sql
+SELECT "occurredAt", "receivedAt", "readerId", alias, granted, outcome
+FROM "KantechReadings"
+ORDER BY "receivedAt" DESC, id DESC
+LIMIT 100;
+```
+
+Klucz zdarzenia chroni przed powtórnym zapisem przy ponowieniu wysyłki. Przetworzone surowe odczyty są usuwane po 30 dniach przez backend. Własna historia obecności ma osobne tabele.
 
 ## Tryb testowy Kantecha
 

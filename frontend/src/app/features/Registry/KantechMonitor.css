@@ -33,9 +33,10 @@
 .kantech-monitor table { width: 100%; border-collapse: collapse; text-align: left; }
 .kantech-monitor th, .kantech-monitor td { padding: .7rem 1rem; border-top: 1px solid var(--admin-accent-border); white-space: nowrap; }
 .kantech-monitor td:first-child { color: var(--admin-accent-text); }
+.kantech-monitor td[data-label="Karta"] { max-width: 18rem; white-space: normal; overflow-wrap: anywhere; }
 .kantech-monitor__empty { padding: 1rem; margin: 0; }
 .kantech-monitor__error { padding: .75rem 1rem; background: var(--admin-danger-soft); }
-.kantech-monitor :focus-visible { outline: 2px solid var(--admin-accent); outline-offset: 2px; }
+.kantech-monitor :focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 2px; }
 
 @media (max-width: 630px) {
   .kantech-monitor thead { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }

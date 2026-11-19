@@ -127,7 +127,7 @@ export function WorkspaceLayout({ title, login, back, onLogout, navigation, chil
       ...(navigation?.ownPlan ? [{
         key: "lecturer", label: "Mój plan", icon: "fas fa-user", to: "/lecturerPlan", active: inPlan && !inPreview,
       }] : []),
-      { key: "kantech", label: "Kantech na żywo", icon: "fas fa-id-card", to: "/adminpanel/kantech", active: pathname === "/adminpanel/kantech" },
+      { key: "kantech", label: "Kantech", icon: "fas fa-id-card", to: "/adminpanel/kantech", active: pathname === "/adminpanel/kantech" },
     ] },
     { label: "Zarządzanie", items: [
       viewItem("schedule", "Ustawienia ekranów"),

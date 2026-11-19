@@ -1,17 +1,28 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
 import { z } from 'zod';
 import type { IncomingScan } from './monitor';
+import { saveReaderReport, type ReaderReport } from './reports';
 import { SmartService } from './smartService';
 
-const config = z.object({
+const coreConfig = {
     KANTECH_URL: z.string().url(),
     KANTECH_USER: z.string().min(1),
     KANTECH_PASS: z.string().min(1),
     KANTECH_POLL_INTERVAL_MS: z.coerce.number().int().min(500).max(60_000).default(1_000),
-    KANTECH_REPORT_URL: z.string().url(),
-    WORKER_SECRET_TOKEN: z.string().min(1),
-});
+};
+const config = z.discriminatedUnion('KANTECH_TRANSPORT', [
+    z.object({
+        ...coreConfig, KANTECH_TRANSPORT: z.literal('http'),
+        KANTECH_REPORT_URL: z.string().url(), WORKER_SECRET_TOKEN: z.string().min(1),
+    }),
+    z.object({
+        ...coreConfig, KANTECH_TRANSPORT: z.literal('postgres'),
+        KANTECH_DATABASE_URL: z.string().url().regex(/^postgres(?:ql)?:\/\//),
+        KANTECH_MODE: z.enum(['observe', 'attendance']),
+    }),
+]);
 
 type Reader = {
     acknowledged: Set<string>;
@@ -23,8 +34,32 @@ type Reader = {
 const readerConfiguration = z.object({ readerIds: z.array(z.string().min(1).max(64)) });
 const refreshInterval = 3_000;
 
+function createTransport(settings: z.infer<typeof config>, signal: AbortSignal) {
+    if (settings.KANTECH_TRANSPORT === 'postgres') {
+        const database = new PrismaClient({ datasourceUrl: settings.KANTECH_DATABASE_URL });
+        return {
+            readerIds: async () => (await database.attendanceReader.findMany({
+                select: { id: true }, orderBy: { id: 'asc' },
+            })).map(({ id }) => id),
+            send: (report: ReaderReport) => saveReaderReport(database, report, settings.KANTECH_MODE, true),
+            close: () => database.$disconnect(),
+        };
+    }
+    const headers = { Authorization: 'Bearer ' + settings.WORKER_SECRET_TOKEN };
+    const readersUrl = settings.KANTECH_REPORT_URL.replace(/\/+$/, '') + '/readers';
+    return {
+        readerIds: async () => {
+            const response = await axios.get(readersUrl, { headers, timeout: 5_000, maxRedirects: 0, signal });
+            return readerConfiguration.parse(response.data).readerIds;
+        },
+        send: async (report: ReaderReport) => {
+            await axios.post(settings.KANTECH_REPORT_URL, report, { headers, timeout: 25_000, maxRedirects: 0, signal });
+        },
+    };
+}
+
 async function main() {
-    const parsed = config.safeParse(process.env);
+    const parsed = config.safeParse({ ...process.env, KANTECH_TRANSPORT: process.env.KANTECH_TRANSPORT ?? 'http' });
     if (!parsed.success) throw new Error('Invalid Kantech worker configuration');
     const settings = parsed.data;
     const source = new SmartService(settings.KANTECH_URL, settings.KANTECH_USER, settings.KANTECH_PASS);
@@ -32,8 +67,7 @@ async function main() {
     process.once('SIGTERM', () => abort.abort());
     process.once('SIGINT', () => abort.abort());
     const readers = new Map<string, Reader>();
-    const headers = { Authorization: 'Bearer ' + settings.WORKER_SECRET_TOKEN };
-    const readersUrl = settings.KANTECH_REPORT_URL.replace(/\/+$/, '') + '/readers';
+    const transport = createTransport(settings, abort.signal);
     let refreshAt = 0;
 
     try {
@@ -41,10 +75,7 @@ async function main() {
             let failed = false;
             if (Date.now() >= refreshAt) {
                 try {
-                    const response = await axios.get(readersUrl, {
-                        headers, timeout: 5_000, maxRedirects: 0, signal: abort.signal,
-                    });
-                    const ids = new Set(readerConfiguration.parse(response.data).readerIds);
+                    const ids = new Set(await transport.readerIds());
                     for (const id of readers.keys()) {
                         if (!ids.has(id)) readers.delete(id);
                     }
@@ -70,12 +101,7 @@ async function main() {
                 const events = [...reader.pending.values()].slice(0, 75);
                 if (!events.length && reader.state === state && Date.now() - reader.lastReport < 10_000) continue;
                 try {
-                    await axios.post(settings.KANTECH_REPORT_URL, { readerId, state, events }, {
-                        timeout: 25_000,
-                        maxRedirects: 0,
-                        headers,
-                        signal: abort.signal,
-                    });
+                    await transport.send({ readerId, state, events });
                     for (const event of events) {
                         reader.pending.delete(event.key);
                         reader.acknowledged.add(event.key);
@@ -93,7 +119,7 @@ async function main() {
                 undefined, { signal: abort.signal }).catch(() => undefined);
         }
     } finally {
-        await source.logout().catch(() => undefined);
+        await Promise.allSettled([source.logout(), transport.close?.()]);
     }
 }
 

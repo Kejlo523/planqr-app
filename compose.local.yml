@@ -1,6 +1,7 @@
 services:
   backend:
     environment:
+      KANTECH_TRANSPORT: ${KANTECH_TRANSPORT:-postgres}
       KANTECH_DEV_TOOLS: "true"
       LDAP_URL: ldap://fixtures:1389
       LDAP_SYNC_ENABLED: "false"
@@ -11,6 +12,11 @@ services:
   kantech:
     environment:
       KANTECH_URL: http://fixtures:8700/SmartService
+      KANTECH_TRANSPORT: ${KANTECH_TRANSPORT:-postgres}
+      KANTECH_DATABASE_URL: ${KANTECH_DATABASE_URL:-${DATABASE_URL}}
+    networks:
+      - default
+      - planqr-local
     depends_on:
       - fixtures
   fixtures:

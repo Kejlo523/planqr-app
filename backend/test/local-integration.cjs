@@ -111,6 +111,37 @@ async function browserSmoke(api, simulator, password, directory) {
         await tabletSelection.check();
         await batchActions.getByText('Operacje zbiorowe · Zaznaczone: 1').waitFor();
         assert.ok(await apply.isEnabled());
+
+        const previewTablets = await Promise.all(Array.from({ length: 9 }, async (_, index) => {
+            const created = await context.request.post(url + '/api/devices', {
+                data: { deviceId: randomUUID(), deviceClassroom: 'TEST ' + (202 + index) },
+            });
+            assert.equal(created.status(), 201);
+            const { id } = await created.json();
+            const paired = await context.request.put(url + '/api/devices/' + id, {
+                data: { status: 'ACTIVE', lastSeen: new Date(Date.now() - 3_600_000).toISOString() },
+            });
+            assert.equal(paired.status(), 204);
+            return id;
+        }));
+        await page.goto(url + '/adminpanel?view=tablet-preview');
+        const tabletPicker = page.getByRole('combobox', { name: 'Tablet', exact: true });
+        await page.waitForURL((target) => target.searchParams.has('deviceId'));
+        await tabletPicker.getByRole('option', { name: /^TEST 210 · / }).waitFor({ state: 'attached' });
+        assert.equal(await tabletPicker.getByRole('option').count(), 10);
+        const lastTablet = String(previewTablets[8]);
+        await tabletPicker.selectOption(lastTablet);
+        await page.waitForURL((target) => target.searchParams.get('deviceId') === lastTablet);
+        await page.reload();
+        await tabletPicker.getByRole('option', { name: /^TEST 210 · / }).waitFor({ state: 'attached' });
+        assert.equal(await tabletPicker.inputValue(), lastTablet);
+        await page.setViewportSize({ width: 390, height: 780 });
+        const anotherTablet = String(previewTablets[0]);
+        await tabletPicker.selectOption(anotherTablet);
+        await page.waitForURL((target) => target.searchParams.get('deviceId') === anotherTablet);
+        assert.equal(await tabletPicker.inputValue(), anotherTablet);
+        console.log('Tablet preview exposes every paired device and keeps the chosen tablet after reload.');
+
         await page.setViewportSize({ width: 1200, height: 780 });
 
         const cardId = '04:51:07:da:00:11';

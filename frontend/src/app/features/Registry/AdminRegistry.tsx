@@ -128,7 +128,7 @@ const AdminRegistry = () => {
   const { theme: adminTheme } = useTheme();
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [admins, setAdmins] = useState<AdminRecord[]>([]);
   const [adminsLoading, setAdminsLoading] = useState(false);
@@ -1703,7 +1703,7 @@ const AdminRegistry = () => {
   }, [currentView]);
 
   useEffect(() => {
-    if (currentView !== "tablet-preview") {
+    if (currentView !== "tablet-preview" || loading) {
       return;
     }
 
@@ -1731,6 +1731,7 @@ const AdminRegistry = () => {
   }, [
     activeDevices,
     currentView,
+    loading,
     previewDevice,
     previewDeviceId,
     previewState,

@@ -176,7 +176,6 @@ export default function LoginPanel() {
               autoComplete="username"
               autoCapitalize="none"
               spellCheck={false}
-              placeholder="Login lub adres e-mail"
               required
               value={login}
               onChange={(event) => setLogin(event.target.value)}

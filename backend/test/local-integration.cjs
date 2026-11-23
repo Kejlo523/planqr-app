@@ -83,6 +83,7 @@ async function browserSmoke(api, simulator, password, directory) {
         }, simulator);
         const page = await context.newPage();
         await page.goto(url + '/');
+        assert.equal(await page.getByLabel('Login uczelniany').getAttribute('placeholder'), null);
         await page.getByLabel('Login uczelniany').fill('pilot-admin@zut.edu.pl');
         await page.getByLabel('Hasło').fill(password);
         const loginResponse = page.waitForResponse((response) => response.url() === url + '/api/auth/login');
@@ -237,7 +238,11 @@ async function browserSmoke(api, simulator, password, directory) {
         await inventoryDoor('49889').getByText('Wyłączony', { exact: true }).waitFor();
         await inventoryDoor('49890').getByText('Brak stanu', { exact: true }).waitFor();
         await page.setViewportSize({ width: 1440, height: 900 });
+        const addReaders = page.getByRole('button', { name: 'Dodaj czytniki', exact: true });
         const readerForm = page.getByRole('region', { name: 'Dodaj czytniki' });
+        await readerForm.waitFor({ state: 'hidden' });
+        await addReaders.click();
+        await readerForm.waitFor();
         assert.ok((await inventory.boundingBox()).x > (await readerForm.boundingBox()).x);
         await page.setViewportSize({ width: 390, height: 780 });
         assert.ok((await inventory.boundingBox()).y > (await readerForm.boundingBox()).y);
@@ -249,17 +254,19 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByLabel('Nazwa wyjścia').fill('Testowe wyjście');
         await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
         await page.getByText('Zapisano parę 49998 → 49997.').waitFor();
-        const pair = page.getByRole('list', { name: 'Pary wejścia i wyjścia' }).getByRole('listitem')
+        await readerForm.waitFor({ state: 'hidden' });
+        const pair = page.getByRole('list', { name: 'Zapisane czytniki' }).getByRole('listitem')
             .filter({ hasText: '49998' });
         await pair.getByText('→', { exact: true }).waitFor();
         assert.match(await pair.textContent(), /Wejście.*49998.*→.*Wyjście.*49997/);
-        await page.getByRole('button', { name: 'Edytuj czytnik 49997' }).click();
+        await page.getByRole('button', { name: 'Edytuj parę 49998 i 49997' }).click();
         assert.equal(await page.getByLabel('ID wejścia').inputValue(), '49998');
         await page.getByLabel('Budynek').fill('TEST');
         await page.getByLabel('Sala', { exact: true }).fill('401');
         await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
         await page.getByText('TEST / 401', { exact: false }).first().waitFor();
 
+        await addReaders.click();
         await page.getByLabel('Jeden czytnik obsługuje wejście i wyjście').check();
         await page.getByLabel('ID wyjścia').waitFor({ state: 'hidden' });
         await page.getByLabel('ID wejścia').fill('49995');

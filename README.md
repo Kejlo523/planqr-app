@@ -56,6 +56,8 @@ Przykładowe pojedyncze odbicie testowe:
 
 Opcjonalny `key` identyfikuje zdarzenie jako 64 znaki szesnastkowe SHA-256. Przy jego braku backend wylicza klucz z treści odbicia. Tryb `observe` służy do obserwacji. Tryb `attendance` zapisuje kwalifikujące się odbicia od `KANTECH_ACTIVE_FROM`.
 
+W zakładce **Odczyty na żywo** administrator LDAP może zmienić tryb przez przełącznik **Automatyczny zapis obecności**. `POST /api/kantech/events/mode` przyjmuje `{"mode":"observe"}` lub `{"mode":"attendance"}`. Zmiana zapisana w bazie obowiązuje bez restartu. Po włączeniu zapisu obowiązuje czas przełączenia, a po wyłączeniu kolejne odbicia trafiają do podglądu. Tryb serwera `off` wyłącza całą obsługę odczytu.
+
 W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>` i odświeża listę przez `GET /internal/kantech/readers`.
 
 Administrator LDAP konfiguruje wejście i wyjście w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. Parę zapisuje się w jednym formularzu. Wariant **Jeden czytnik obsługuje wejście i wyjście** pozwala prowadzącemu zamknąć listę na tym samym urządzeniu co najmniej 60 sekund po otwarciu. W obu wariantach wpisz budynek i numer sali zgodne z Planem ZUT.
@@ -70,7 +72,7 @@ Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu
 
 ### Połączenie workera z PostgreSQL
 
-Ustaw `KANTECH_TRANSPORT=postgres` i `KANTECH_DATABASE_URL` w prywatnym `.env`. Po migracji i zapisaniu czytników worker pobiera ich konfigurację z PostgreSQL oraz zapisuje odczyty i stan czytników bez połączenia z API PlanQR. Źródłem zdarzeń nadal jest SmartService. Backend po uruchomieniu przetwarza kolejkę według trybu z chwili odbioru. Odbicia w trybie `observe` służą do podglądu, a zdarzenia z trybu `attendance` czekają na backend działający w tym trybie.
+Ustaw `KANTECH_TRANSPORT=postgres` i `KANTECH_DATABASE_URL` w prywatnym `.env`. Po migracji i zapisaniu czytników worker pobiera ich konfigurację z PostgreSQL oraz zapisuje odczyty i stan czytników bez połączenia z API PlanQR. Źródłem zdarzeń jest SmartService. Ustawienie z panelu ma pierwszeństwo przed trybem z `.env`. Backend przetwarza kolejkę zgodnie z trybem zapisanym przy odbiorze każdego zdarzenia.
 
 Nadaj osobnemu użytkownikowi workera dostęp do bazy PlanQR i poniższe uprawnienia po migracji. W lokalnym Compose tryb `postgres` domyślnie korzysta z połączenia do bazy testowej.
 
@@ -80,6 +82,7 @@ GRANT SELECT (id) ON "AttendanceReader" TO planqr_kantech;
 GRANT INSERT ON "KantechEvent" TO planqr_kantech;
 GRANT SELECT, INSERT, UPDATE ON "KantechReaderStatus" TO planqr_kantech;
 GRANT SELECT, INSERT, UPDATE ON "KantechInventory" TO planqr_kantech;
+GRANT SELECT ON "KantechCaptureSettings" TO planqr_kantech;
 ```
 
 Panel Kantecha i raport odczytują te same dane. Kontu raportowemu wystarczy `USAGE` na schemacie i `SELECT` na widoku `"KantechReadings"`.

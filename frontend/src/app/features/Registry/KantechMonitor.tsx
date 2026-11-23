@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { WorkspaceLayout } from "../../layout/WorkspaceLayout";
 import { useProtectedSession } from "../../router/ProtectedRoute";
@@ -11,8 +11,10 @@ import { KantechNavigation } from "./KantechNavigation";
 import { kantechTime as time, outcomeLabel } from "./kantechPresentation";
 import { useAdminScrollRoot } from "./useAdminScrollRoot";
 
+type CaptureMode = "observe" | "attendance";
+
 interface Snapshot {
-  mode: "off" | "observe" | "attendance";
+  mode: "off" | CaptureMode;
   devTools?: boolean;
   readers: { id: string; state: "connected" | "unavailable"; checkedAt: string }[];
   events: {
@@ -45,11 +47,15 @@ function KantechLiveMonitor() {
   const [error, setError] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [reader, setReader] = useState("");
+  const [savingMode, setSavingMode] = useState(false);
+  const [modeError, setModeError] = useState("");
+  const modeRevision = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
+      const revision = modeRevision.current;
       try {
         const response = await fetch("/api/kantech/events", {
           credentials: "include", cache: "no-store", signal: controller.signal,
@@ -62,7 +68,8 @@ function KantechLiveMonitor() {
         if (!response.ok) throw new Error("Monitor unavailable");
         const data: Snapshot = await response.json();
         if (!controller.signal.aborted) {
-          setSnapshot(data);
+          setSnapshot((current) => revision === modeRevision.current || !current
+            ? data : { ...data, mode: current.mode });
           setError(false);
         }
       } catch {
@@ -78,6 +85,28 @@ function KantechLiveMonitor() {
     };
   }, []);
 
+  const changeMode = async (mode: CaptureMode) => {
+    setSavingMode(true);
+    setModeError("");
+    try {
+      const response = await fetch("/api/kantech/events/mode", {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message || "Nie udało się zmienić trybu Kantecha.");
+      }
+      const next: { mode: CaptureMode } = await response.json();
+      modeRevision.current++;
+      setSnapshot((current) => current && { ...current, mode: next.mode });
+    } catch (cause) {
+      setModeError(cause instanceof Error ? cause.message : "Nie udało się zmienić trybu Kantecha.");
+    } finally {
+      setSavingMode(false);
+    }
+  };
+
   const events = snapshot?.events.filter((event) => !reader || reader === event.readerId) ?? [];
   return (
     <main className="kantech-monitor">
@@ -87,14 +116,23 @@ function KantechLiveMonitor() {
           <div>
             <h1>Kantech na żywo</h1>
           </div>
-          <div>
-            <span className="kantech-monitor__mode">
+          <div className="kantech-monitor__mode-control">
+            <span className="kantech-monitor__mode" role="status">
               {snapshot?.mode === "observe" ? "Tryb obserwacji"
                 : snapshot?.mode === "attendance" ? "Zapis obecności"
                   : snapshot ? "Odczyt wyłączony" : forbidden ? "Brak dostępu" : "Łączenie…"}
             </span>
+            {snapshot && snapshot.mode !== "off" && !forbidden && (
+              <label className="admin-switch" aria-busy={savingMode}>
+                <input type="checkbox" role="switch" checked={snapshot.mode === "attendance"}
+                  disabled={savingMode || error}
+                  onChange={(event) => void changeMode(event.target.checked ? "attendance" : "observe")} />
+                <span>Automatyczny zapis obecności</span>
+              </label>
+            )}
           </div>
         </header>
+        {modeError && <p role="alert" className="kantech-monitor__error">{modeError}</p>}
         {error && <p role="alert" className="kantech-monitor__error">Podgląd chwilowo niedostępny. Ponawiam połączenie.</p>}
         {forbidden && <p role="alert" className="kantech-monitor__error">Zaloguj się przez LDAP na konto administratora.</p>}
         <section className="kantech-monitor__readers" aria-label="Stan czytników">

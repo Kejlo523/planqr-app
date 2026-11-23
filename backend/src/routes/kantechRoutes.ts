@@ -4,6 +4,7 @@ import { json, NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
 import { getMonitor, incomingReport } from '../attendance/monitor';
+import { captureSettingsInput, readCaptureSettings, updateCaptureSettings } from '../attendance/captureSettings';
 import { saveReaderReport } from '../attendance/reports';
 import { inventoryReaders, saveInventory } from '../attendance/inventory';
 import { attendanceDb } from '../attendance/store';
@@ -61,12 +62,37 @@ kantechEvents.get('/', requireLdapAdmin, async (req, res) => {
     }
     res.set('Cache-Control', 'no-store');
     try {
-        const monitor = await getMonitor(attendanceDb, parsed.data.readerId, parsed.data.limit);
-        res.json({ mode: env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...monitor });
+        const [monitor, settings] = await Promise.all([
+            getMonitor(attendanceDb, parsed.data.readerId, parsed.data.limit),
+            env.KANTECH_MODE === 'off' ? null : readCaptureSettings(attendanceDb),
+        ]);
+        res.json({ mode: settings?.mode ?? env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...monitor });
     } catch {
         res.status(503).json({ message: 'Reader monitor unavailable' });
     }
 });
+
+kantechEvents.post('/mode', requireLdapAdmin,
+    auditAction('KANTECH', 'Zmieniono tryb Kantecha', (req) =>
+        req.body?.mode === 'attendance' ? 'Zapis obecności' : 'Tryb obserwacji'),
+    async (req, res) => {
+        if (env.KANTECH_MODE === 'off') {
+            res.status(409).json({ message: 'Odczyt Kantecha jest wyłączony w konfiguracji serwera.' });
+            return;
+        }
+        const input = captureSettingsInput.safeParse(req.body);
+        if (!input.success) {
+            res.status(400).json({ message: 'Nieprawidłowy tryb Kantecha.' });
+            return;
+        }
+        try {
+            res.set('Cache-Control', 'no-store');
+            res.json(await updateCaptureSettings(attendanceDb, input.data.mode));
+        } catch {
+            res.status(503).json({ message: 'Nie udało się zmienić trybu Kantecha.' });
+        }
+    },
+);
 
 async function acceptReport(req: Request, res: Response, worker = false) {
     if (env.KANTECH_MODE === 'off') {

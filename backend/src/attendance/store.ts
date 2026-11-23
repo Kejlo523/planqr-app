@@ -104,7 +104,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
     const profilesByLogin = new Map(profiles.map((profile) => [profile.username, profile]));
     const results = new Map<string, string[]>();
     const data: Prisma.AttendanceScanCreateManyInput[] = [];
-    const cutover = env.KANTECH_ACTIVE_FROM ? new Date(env.KANTECH_ACTIVE_FROM).getTime() : Infinity;
+    const legacyCutover = env.KANTECH_ACTIVE_FROM ? Date.parse(env.KANTECH_ACTIVE_FROM) : Infinity;
     for (const event of events) {
         const binding = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
         const card = attendanceIdentity(event.alias, binding, profilesByLogin.get(event.alias.trim().toLowerCase()));
@@ -116,6 +116,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
         let outcome = invalid ?? 'observed';
         if (reader?.direction && entry && card && occurredAt && !invalid && event.captureMode === 'attendance') {
             outcome = 'outside_cutover';
+            const cutover = event.captureActiveFrom?.getTime() ?? legacyCutover;
             if (+occurredAt >= cutover && +occurredAt <= Date.now() + 60_000) {
                 outcome = 'received';
                 data.push({
@@ -143,8 +144,9 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
 }
 
 function processKantechBatch() {
-    const captureModes = env.KANTECH_MODE === 'attendance' ? ['observe', 'attendance'] : ['observe'];
-    const pending = Prisma.sql`"outcome" IS NULL AND "captureMode" IN (${Prisma.join(captureModes)})`;
+    const pending = Prisma.sql`"outcome" IS NULL AND (
+        "captureMode" = 'observe' OR "captureActiveFrom" IS NOT NULL OR ${env.KANTECH_MODE === 'attendance'}
+    )`;
     return attendanceDb.$transaction(async (tx) => {
         const events = await tx.$queryRaw<KantechEvent[]>`
             SELECT * FROM "KantechEvent" WHERE ${pending} AND "readerId" = (
@@ -216,7 +218,7 @@ export async function resolvePendingScans() {
 }
 
 export function startAttendanceJob() {
-    if (env.KANTECH_MODE !== 'attendance') return;
+    if (env.KANTECH_MODE === 'off') return;
     let working = false;
     setInterval(async () => {
         if (working) return;

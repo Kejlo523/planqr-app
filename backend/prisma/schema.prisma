@@ -267,6 +267,17 @@ model KantechInventory {
   checkedAt DateTime @db.Timestamptz(3)
 }
 
+enum KantechCaptureMode {
+  observe
+  attendance
+}
+
+model KantechCaptureSettings {
+  id         Int                @id
+  mode       KantechCaptureMode
+  activeFrom DateTime?          @db.Timestamptz(3)
+}
+
 model KantechEvent {
   id          String   @id
   readerId    String
@@ -275,6 +286,7 @@ model KantechEvent {
   occurredAt  DateTime? @db.Timestamptz(3)
   receivedAt  DateTime @default(now()) @db.Timestamptz(3)
   captureMode String
+  captureActiveFrom DateTime? @db.Timestamptz(3)
   outcome     String?
 
   @@index([receivedAt, id])

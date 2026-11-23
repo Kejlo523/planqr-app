@@ -667,6 +667,7 @@ async function main() {
                 GRANT INSERT ON "KantechEvent" TO ${workerRole};
                 GRANT SELECT, INSERT, UPDATE ON "KantechReaderStatus" TO ${workerRole};
                 GRANT SELECT, INSERT, UPDATE ON "KantechInventory" TO ${workerRole};
+                GRANT SELECT ON "KantechCaptureSettings" TO ${workerRole};
             `);
             await readingsSql.query('DELETE FROM "KantechInventory"');
             await readingsSql.query(`INSERT INTO ldap_users (username, display_name, given_name, surname, title)
@@ -785,12 +786,53 @@ async function main() {
         assert.equal(singleClosed.students[0].albumNumber, '054321');
         console.log('Atomic reader setup and single-reader closing threshold passed.');
 
+        await stop(server);
+        server = startBackend('observe');
+        headers = await authenticate();
+        const modeUrl = api + '/api/kantech/events/mode';
+        const changeMode = (mode, authorized = headers) => request(modeUrl, { headers: authorized, json: { mode } });
+        assert.equal((await live()).mode, 'observe');
+        assert.equal((await changeMode('attendance', {})).status, 401);
+        assert.equal((await changeMode('attendance', lecturer)).status, 403);
+        assert.equal((await changeMode('off')).status, 400);
+        const enabled = await changeMode('attendance');
+        assert.equal(enabled.status, 200);
+        const { activeFrom } = await enabled.json();
+        assert.equal((await (await changeMode('attendance')).json()).activeFrom, activeFrom);
+        assert.equal((await live()).mode, 'attendance');
+        const cutover = Date.parse(activeFrom);
+        const aroundSwitch = (offset) => new Date(cutover + offset).toISOString();
+        assert.ok((await request(simulator + '/test/schedule', {
+            json: [{ ...event(9400, -300, 1_800), start: aroundSwitch(-60_000), end: aroundSwitch(1_800_000) }],
+        })).ok);
+        await emit('s94001', aroundSwitch(-2_000));
+        await emit('WISYNC_1', aroundSwitch(2_000));
+        await emit('s94002', aroundSwitch(3_000));
+        await waitFor('dynamic mode through PostgreSQL while backend started in observe', async () => {
+            const response = await list(9400);
+            return response.ok && (await response.json()).students.some(({ username }) => username === 's94002');
+        });
+        assert.ok((await live()).events.some(({ label, outcome }) => label === 's94001' && outcome === 'outside_cutover'));
+        const submitReport = (alias, offset, readerId) => request(api + '/internal/kantech', {
+            headers: service, json: { alias, readerId, granted: true, occurredAt: aroundSwitch(offset) },
+        });
+        assert.equal((await submitReport('WISYNC_1', 4_000, '49921')).status, 204);
+        await waitFor('HTTP worker report closes the list in dynamic attendance mode', async () =>
+            (await (await list(9400)).json()).status === 'closed');
+        assert.deepEqual(await (await changeMode('observe')).json(), { mode: 'observe', activeFrom: null });
+        assert.equal((await submitReport('s94003', 5_000, '49919')).status, 204);
+        await waitFor('readings return to observation', async () =>
+            (await live()).events.some(({ label, outcome }) => label === 's94003' && outcome === 'observed'));
+        assert.equal((await live()).mode, 'observe');
+        console.log('LDAP mode switch, capture cutover, and HTTP and PostgreSQL reports passed without a restart.');
+
         for (const id of ['49919', '49920', '49921', '49922', singleReader.id]) {
             assert.equal((await request(readersApi + '/' + id, { headers, method: 'DELETE' })).status, 204);
         }
         await stop(server);
         server = startBackend('attendance');
         headers = await authenticate();
+        assert.equal((await live()).mode, 'observe');
         assert.deepEqual((await (await request(workerReaders, { headers: service })).json()).readerIds, []);
         assert.equal((await list(9001)).status, 200);
         assert.equal((await events('?limit=1')).retentionDays, 7);

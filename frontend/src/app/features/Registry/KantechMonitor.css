@@ -19,6 +19,9 @@
 .kantech-monitor__heading, .kantech-monitor__feed-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .kantech-monitor__heading { padding: 1.4rem 0; }
 .kantech-monitor__heading h1 { margin: 0; font: 600 clamp(1.9rem, 5vw, 2.65rem)/1.1 var(--pq-heading); letter-spacing: -.02em; }
+.kantech-monitor__mode-control { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem 1rem; }
+.kantech-monitor__mode-control .admin-switch input { flex-shrink: 0; }
+.kantech-monitor__mode-control .admin-switch input:disabled { opacity: .6; cursor: wait; }
 .kantech-monitor__mode { padding: .45rem .75rem; background: var(--admin-accent-soft); color: var(--admin-accent-text); border-radius: var(--admin-radius); font-weight: 600; }
 .kantech-monitor__readers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
 .kantech-monitor__reader { background: var(--admin-surface); border: 1px solid var(--admin-border); border-radius: var(--admin-radius); border-left: .25rem solid var(--admin-warning); padding: .75rem 1rem; display: grid; gap: .25rem; }

@@ -283,6 +283,9 @@ const buildAttendanceRows = (
 ): Array<Array<string | number | null | undefined>> => [
   ["Lista obecności"],
   ["ID zajęć", lessonId ?? draft.lessonId ?? ""],
+  ["Przedmiot", draft.title ?? ""],
+  ["Sala", draft.room ?? ""],
+  ["Grupa", draft.group ?? ""],
   ["Status", draft.status],
   ["Sesja", draft.sessionId ?? ""],
   ["Prowadzący", draft.lecturerDisplayName ?? ""],

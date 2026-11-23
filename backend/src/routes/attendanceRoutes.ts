@@ -16,6 +16,7 @@ const listQuery = z.object({
     sessionId: idSchema.optional(),
     lesson_id: z.string().min(1).max(180).optional(),
     from: z.string().datetime({ offset: true }).optional(),
+    teacher: z.string().trim().min(1).max(180).optional(),
 });
 const memberBody = z.object({
     username: z.string().trim().min(1).max(100),
@@ -44,23 +45,25 @@ const memberView = (member: AttendanceMember) => ({
 });
 
 const sessionStatus = (session: AttendanceSession, now = new Date()) =>
-    session.sentAt ? 'sent' : session.closesAt <= now ? 'closed' : 'open';
+    session.sentAt ? 'sent' : session.closesAt && session.closesAt <= now ? 'closed' : 'open';
 const sessionView = (session: SessionWithMembers) => {
     const now = new Date();
     const status = sessionStatus(session, now);
-    const closedAt = status === 'open' ? null : session.closesAt.toISOString();
+    const closedAt = status === 'open' ? null : session.closesAt?.toISOString() ?? null;
     return {
         status,
         sessionId: session.id,
         dydaktykId: session.id,
         lessonId: session.lessonId,
         title: session.title,
+        group: session.lessonGroup,
         room: session.roomLabel,
         lecturerId: session.ownerLogin,
         lecturerUsername: session.ownerLogin,
         lecturerDisplayName: session.ownerName,
         lecturerCardHex: '',
         doorId: session.readerId,
+        exitReaderId: session.exitReaderId,
         openedAt: session.openedAt.toISOString(),
         closedAt,
         from: session.openedAt.toISOString(),
@@ -118,7 +121,8 @@ router.use(requireLecturerAccess);
 
 router.get('/', handle(async (req, res) => {
     const sessions = await attendanceDb.attendanceSession.findMany({
-        where: { ...owner(req), ...(req.query.active === 'true' ? { closesAt: { gt: new Date() } } : {}) },
+        where: { ...owner(req), ...(req.query.active === 'true'
+            ? { OR: [{ closesAt: null }, { closesAt: { gt: new Date() } }] } : {}) },
         orderBy: { openedAt: 'desc' },
         take: 500,
     });
@@ -129,9 +133,22 @@ router.get('/list', handle(async (req, res) => {
     const query = listQuery.parse(req.query);
     const id = query.session_id ?? query.sessionId;
     if (!id && !query.lesson_id) throw new RequestError(400, 'A lesson or session is required');
+    let scope: Prisma.AttendanceSessionWhereInput = owner(req);
+    if (query.teacher) {
+        if (!req.user!.isAdmin) throw new RequestError(403, 'Teacher preview requires an administrator');
+        const name = { equals: query.teacher, mode: 'insensitive' as const };
+        const users = await attendanceDb.ldapUser.findMany({
+            where: { displayName: name }, select: { username: true },
+        });
+        scope = {
+            voided: false,
+            OR: [{ teacherScheduleId: name }, { ownerName: name },
+                { ownerLogin: { in: users.map(({ username }) => username) } }],
+        };
+    }
     const results = await attendanceDb.attendanceSession.findMany({
         where: {
-            ...owner(req),
+            ...scope,
             ...(id ? { id } : { lessonId: query.lesson_id, lessonStart: query.from ? new Date(query.from) : undefined }),
         },
         include: members,
@@ -175,7 +192,8 @@ router.post('/pending/:id/choose', auditAction('ATTENDANCE', 'Wybrano zajęcia d
 router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę obecności'), handle(async (req, res) => {
     await editSession(req, async (tx, session) => {
         const now = new Date();
-        if (session.closesAt <= now) return;
+        if (session.closesAt && session.closesAt <= now) return;
+        if (session.exitReaderId) throw new RequestError(409, 'Close the list with the configured exit reader');
         await tx.attendanceSession.update({
             where: { id: session.id }, data: { manualClosedAt: now },
         });
@@ -209,7 +227,7 @@ router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do l
             const [hour, minute, second = 0] = payload.entered_at.split(':').map(Number);
             at = lessonDate.set({ hour, minute, second, millisecond: 0 }).toJSDate();
         }
-        if (at < session.openedAt || at >= session.closesAt) {
+        if (at < session.openedAt || (session.closesAt && at >= session.closesAt)) {
             throw new RequestError(400, 'Attendance time must be within the session');
         }
         const album = /^\d+$/.test(login) ? login : null;

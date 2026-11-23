@@ -4,6 +4,7 @@ import axios from 'axios';
 import { z } from 'zod';
 import type { IncomingScan } from './monitor';
 import { saveReaderReport, type ReaderReport } from './reports';
+import { saveInventory, type InventoryReaders } from './inventory';
 import { SmartService } from './smartService';
 
 const coreConfig = {
@@ -33,6 +34,7 @@ type Reader = {
 
 const readerConfiguration = z.object({ readerIds: z.array(z.string().min(1).max(64)) });
 const refreshInterval = 3_000;
+const inventoryInterval = 60_000;
 
 function createTransport(settings: z.infer<typeof config>, signal: AbortSignal) {
     if (settings.KANTECH_TRANSPORT === 'postgres') {
@@ -42,18 +44,22 @@ function createTransport(settings: z.infer<typeof config>, signal: AbortSignal) 
                 select: { id: true }, orderBy: { id: 'asc' },
             })).map(({ id }) => id),
             send: (report: ReaderReport) => saveReaderReport(database, report, settings.KANTECH_MODE, true),
+            inventory: (readers: InventoryReaders) => saveInventory(database, readers),
             close: () => database.$disconnect(),
         };
     }
     const headers = { Authorization: 'Bearer ' + settings.WORKER_SECRET_TOKEN };
-    const readersUrl = settings.KANTECH_REPORT_URL.replace(/\/+$/, '') + '/readers';
+    const reportUrl = settings.KANTECH_REPORT_URL.replace(/\/+$/, '');
     return {
         readerIds: async () => {
-            const response = await axios.get(readersUrl, { headers, timeout: 5_000, maxRedirects: 0, signal });
+            const response = await axios.get(reportUrl + '/readers', { headers, timeout: 5_000, maxRedirects: 0, signal });
             return readerConfiguration.parse(response.data).readerIds;
         },
         send: async (report: ReaderReport) => {
-            await axios.post(settings.KANTECH_REPORT_URL, report, { headers, timeout: 25_000, maxRedirects: 0, signal });
+            await axios.post(reportUrl, report, { headers, timeout: 25_000, maxRedirects: 0, signal });
+        },
+        inventory: async (readers: InventoryReaders) => {
+            await axios.post(reportUrl + '/inventory', readers, { headers, timeout: 5_000, maxRedirects: 0, signal });
         },
     };
 }
@@ -69,9 +75,25 @@ async function main() {
     const readers = new Map<string, Reader>();
     const transport = createTransport(settings, abort.signal);
     let refreshAt = 0;
+    let inventoryAt = 0;
+    let inventoryTask: Promise<void> | undefined;
+    let inventoryFailed = false;
 
     try {
         while (!abort.signal.aborted) {
+            if (!inventoryTask && Date.now() >= inventoryAt) {
+                inventoryTask = source.readInventory(abort.signal).then(async (items) => {
+                    if (abort.signal.aborted) return;
+                    await transport.inventory(items);
+                    inventoryFailed = false;
+                }).catch(() => {
+                    if (!inventoryFailed && !abort.signal.aborted) console.warn('[Kantech] Reader inventory could not be refreshed.');
+                    inventoryFailed = true;
+                }).finally(() => {
+                    inventoryAt = Date.now() + (inventoryFailed ? 10_000 : inventoryInterval);
+                    inventoryTask = undefined;
+                });
+            }
             let failed = false;
             if (Date.now() >= refreshAt) {
                 try {
@@ -119,6 +141,7 @@ async function main() {
                 undefined, { signal: abort.signal }).catch(() => undefined);
         }
     } finally {
+        await inventoryTask;
         await Promise.allSettled([source.logout(), transport.close?.()]);
     }
 }

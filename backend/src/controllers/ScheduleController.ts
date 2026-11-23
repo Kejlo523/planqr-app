@@ -37,8 +37,13 @@ export const getPlan = async(req: AuthRequest, res: Response) => {
             orderBy: { alias: 'asc' },
             select: { scheduleId: true },
         }) : null;
-        const service = new ZutServices(binding ? env.ZUT_ATTENDANCE_SCHEDULE_URL : undefined);
-        const data = await service.getSchedule(binding?.scheduleId ?? normalizedId, normalizedKind, start as string, end as string);
+        const scanBinding = ownPlan && !binding ? await prisma.attendanceSession.findFirst({
+            where: { ownerLogin: req.user!.login.trim().toLowerCase(), voided: false, teacherScheduleId: { not: null } },
+            orderBy: { openedAt: 'desc' }, select: { teacherScheduleId: true },
+        }) : null;
+        const teacherId = binding?.scheduleId ?? scanBinding?.teacherScheduleId;
+        const service = new ZutServices(teacherId ? env.ZUT_ATTENDANCE_SCHEDULE_URL : undefined);
+        const data = await service.getSchedule(teacherId ?? normalizedId, normalizedKind, start as string, end as string);
 
         // Enrich each event with a stable numeric ID if it doesn't have one
         const enriched = Array.isArray(data)

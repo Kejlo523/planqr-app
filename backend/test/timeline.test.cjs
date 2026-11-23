@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createServer } = require('node:http');
 const { buildTimeline } = require('../dist/attendance/timeline');
-const { parseReaderSnapshot, SmartService } = require('../dist/attendance/smartService');
+const { parseReaderSnapshot, parseSmartServiceDoors, parseSmartServiceDoorState, SmartService } = require('../dist/attendance/smartService');
 const { parseCampusTime } = require('../dist/attendance/scheduleTime');
 const { normalizeCardAlias } = require('../dist/attendance/cardAlias');
 
@@ -49,6 +49,58 @@ test('an ambiguous lesson starts only after a choice and recomputes buffered par
     assert.equal(actual.closesAt.toISOString(), end);
 });
 
+test('paired attendance uses the opening reader, keeps one row and closes only at the assigned exit', () => {
+    const tap = (id, at, login, readerId = '49919', readerDirection = 'ENTRY') => ({
+        ...scan(id, time(at), login, login === 'lecturer' ? [lesson] : []),
+        readerId, readerDirection, exitReaderId: '49921',
+    });
+    const taps = [
+        tap('exit-first', '10:00:00', 'lecturer', '49921', 'EXIT'),
+        tap('open', '10:00:01', 'lecturer'),
+        tap('student', '10:00:03', 'n57796'),
+        tap('student-repeats', '10:00:10', 'n57796'),
+        tap('other-entry', '10:01:00', 'n45678', '49920'),
+        tap('student-exit', '10:02:00', 'n57796', '49921', 'EXIT'),
+        tap('lecturer-entry', '10:03:00', 'lecturer'),
+        tap('wrong-exit', '10:04:00', 'lecturer', '49999', 'EXIT'),
+    ];
+    const open = buildTimeline(taps, new Map());
+    const first = [...open.sessions.values()][0];
+    assert.equal(first.closesAt, null);
+    assert.equal(first.members.size, 1);
+    assert.equal(first.members.get('n57796').count, 1);
+    assert.equal(first.members.get('n57796').lastAt.toISOString(), time('10:00:03'));
+    assert.equal(open.outcomes.get('other-entry'), 'wrong_entry_reader');
+    assert.equal(open.outcomes.get('student-exit'), 'exit_ignored');
+    assert.equal(open.outcomes.get('lecturer-entry'), 'repeat_tap');
+    const closed = buildTimeline([...taps, tap('close', '11:05:00', 'lecturer', '49921', 'EXIT')], new Map());
+    assert.equal([...closed.sessions.values()][0].closesAt.toISOString(), time('11:05:00'));
+    assert.equal(closed.outcomes.get('close'), 'closed');
+});
+
+test('one reader closes only for the lecturer at least 60 seconds after opening', () => {
+    const tap = (id, at, login = 'lecturer') => ({
+        ...scan(id, at, login, login === 'lecturer' ? [lesson] : []),
+        readerDirection: 'ENTRY', exitReaderId: '49919',
+    });
+    const taps = [
+        tap('open', start),
+        tap('early', time('10:00:02')),
+        tap('student', time('10:00:10'), 'n57796'),
+        tap('just-before', '2026-11-18T10:00:59.999Z'),
+        tap('close', time('10:01:00')),
+        tap('after-close', time('10:01:20'), 'n54321'),
+    ];
+    const { outcomes, sessions } = buildTimeline(taps, new Map());
+    const [session] = sessions.values();
+    assert.equal(outcomes.get('early'), 'close_too_soon');
+    assert.equal(outcomes.get('just-before'), 'close_too_soon');
+    assert.equal(outcomes.get('close'), 'closed');
+    assert.equal(outcomes.get('after-close'), 'no_session');
+    assert.equal(session.closesAt.toISOString(), time('10:01:00'));
+    assert.deepEqual([...session.members.keys()], ['n57796']);
+});
+
 test('SmartService timestamps use Warsaw and snapshot positions do not change event identity', () => {
     const xml = (key) => '<Reply><item><key><string>' + key + '</string></key><value><SmartLinkDataValue>' +
         '<Value>2026-07-15  09:29:07 Access granted 0000:00A1 wisync_22</Value>' +
@@ -82,4 +134,16 @@ test('SmartService backs off operator login outside its configured schedule', as
     } finally {
         server.close();
     }
+});
+
+test('SmartService inventory distinguishes communication from lock state and service faults', () => {
+    assert.deepEqual(parseSmartServiceDoors('<ArrayOfDoor><Door><PkData>49919</PkData><Description>Entrance</Description>' +
+        '</Door><Door><Id>49920</Id></Door></ArrayOfDoor>'), [
+        { id: '49919', label: 'Entrance' }, { id: '49920', label: null },
+    ]);
+    assert.deepEqual(parseSmartServiceDoors('<ArrayOfDoor/>'), []);
+    assert.throws(() => parseSmartServiceDoors('<StandardFault><Message>SMARTLINK_INVALID_SESSION</Message></StandardFault>'), /INVALID_SESSION/);
+    assert.equal(parseSmartServiceDoorState('<Door><Status>Locked</Status><CommunicationState>Connected</CommunicationState></Door>'), 'online');
+    assert.equal(parseSmartServiceDoorState('<Door><ControllerFailure>Yes</ControllerFailure><Status>Reader disabled</Status></Door>'), 'offline');
+    assert.equal(parseSmartServiceDoorState('<Door><Status>Locked</Status></Door>'), 'unknown');
 });

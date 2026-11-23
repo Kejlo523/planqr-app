@@ -15,6 +15,7 @@ interface LessonAttendancePanelProps {
   layout?: "panel" | "page";
   isLoading?: boolean;
   error?: string | null;
+  readOnly?: boolean;
   onOpenList?: () => void;
   onCloseList?: () => void;
   onSendList?: () => void;
@@ -64,6 +65,7 @@ export default function LessonAttendancePanel({
   layout = "panel",
   isLoading = false,
   error = null,
+  readOnly = false,
   onOpenList,
   onCloseList,
   onSendList,
@@ -80,6 +82,12 @@ export default function LessonAttendancePanel({
     setTimeInput(buildCurrentTime());
   }, [lessonId]);
 
+  useEffect(() => {
+    if (!lessonId || !onRefresh || isLoading || (draft?.status !== "idle" && draft?.status !== "open")) return;
+    const timer = window.setTimeout(onRefresh, 3000);
+    return () => window.clearTimeout(timer);
+  }, [lessonId, draft?.status, isLoading, onRefresh]);
+
   if (!lessonId || !draft) {
     return (
       <section
@@ -89,18 +97,18 @@ export default function LessonAttendancePanel({
           <h2>Wybierz zajęcia</h2>
           <p>Panel obecności otwiera się z prawej strony.</p>
         </div>
-        <AttendanceChoices />
+        {!readOnly && <AttendanceChoices />}
       </section>
     );
   }
 
   const isOpen = draft.status === "open";
   const canCheckScan = draft.status === "idle";
-  const canClose = draft.status === "open";
+  const canClose = draft.status === "open" && !draft.exitReaderId;
   const canSend = draft.status === "closed";
   const hasSession = Boolean(draft.sessionId);
   const addDisabled = !isOpen || !hasSession || albumInput.trim().length === 0;
-  const canDownload = hasSession && !isOpen;
+  const canDownload = hasSession;
 
   return (
     <section className={`lesson-attendance lesson-attendance--${layout}`}>
@@ -138,9 +146,20 @@ export default function LessonAttendancePanel({
         </div>
       </header>
 
-      <AttendanceChoices />
+      {!readOnly && <AttendanceChoices />}
 
-      <div className="lesson-attendance__composer">
+      {hasSession && (
+        <div className="lesson-attendance__feedback">
+          {[draft.title, draft.room, draft.group && `Grupa ${draft.group}`].filter(Boolean).join(" · ")}
+          {draft.exitReaderId && (
+            <div>{draft.doorId === draft.exitReaderId
+              ? `Czytnik ${draft.doorId} · wejście i wyjście. Zamknięcie po minucie od otwarcia.`
+              : `Czytniki ${draft.doorId} → ${draft.exitReaderId}`}</div>
+          )}
+        </div>
+      )}
+
+      {!readOnly && <div className="lesson-attendance__composer">
         <input
           type="text"
           value={albumInput}
@@ -173,7 +192,7 @@ export default function LessonAttendancePanel({
           <FaPlus />
           Dodaj
         </button>
-      </div>
+      </div>}
 
       <div className="lesson-attendance__list-shell">
         {error ? (
@@ -182,7 +201,7 @@ export default function LessonAttendancePanel({
           </div>
         ) : null}
 
-        {isLoading ? (
+        {isLoading && !draft.loadedAt ? (
           <div className="lesson-attendance__feedback">Wczytywanie listy obecności...</div>
         ) : draft.rows.length === 0 ? (
           <div className="lesson-attendance__empty-inline">
@@ -209,7 +228,7 @@ export default function LessonAttendancePanel({
                   </span>
                 </div>
 
-                <button
+                {!readOnly && <button
                   type="button"
                   className="admin-button admin-button--ghost admin-button--small"
                   disabled={!isOpen}
@@ -217,7 +236,7 @@ export default function LessonAttendancePanel({
                 >
                   <FaTrash />
                   Usuń
-                </button>
+                </button>}
               </li>
             ))}
           </ul>
@@ -246,23 +265,23 @@ export default function LessonAttendancePanel({
             <FaDownload />
             Pobierz XLSX
           </button>
-          <button
+          {onOpenList && <button
             type="button"
             className="admin-button admin-button--secondary admin-button--small"
             disabled={!canCheckScan || isLoading}
             onClick={onOpenList}
           >
             Sprawdź odbicie
-          </button>
-          <button
+          </button>}
+          {!readOnly && !draft.exitReaderId && <button
             type="button"
             className="admin-button admin-button--ghost admin-button--small"
             disabled={!canClose || !hasSession}
             onClick={onCloseList}
           >
             Zamknij listę
-          </button>
-          <button
+          </button>}
+          {!readOnly && <button
             type="button"
             className="admin-button admin-button--primary admin-button--small"
             disabled={!canSend || !hasSession}
@@ -270,7 +289,7 @@ export default function LessonAttendancePanel({
           >
             <FaFileExport />
             Wyślij listę
-          </button>
+          </button>}
         </div>
       </footer>
     </section>

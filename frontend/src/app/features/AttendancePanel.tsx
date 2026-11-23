@@ -38,7 +38,7 @@ export default function AttendancePanel() {
   const applyAttendanceList = (attendanceList: Awaited<ReturnType<typeof fetchLessonAttendanceList>>) => {
     setDraft((current) => attendanceList
       ? applyAttendanceListToDraft(current, attendanceList)
-      : createAttendanceDraft(lessonId, room));
+      : { ...createAttendanceDraft(lessonId, room), loadedAt: new Date().toISOString() });
   };
 
   const loadAttendance = async (sessionIdOverride?: number | null) => {

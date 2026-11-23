@@ -169,6 +169,12 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.equal(content.subarray(0, 2).toString(), 'PK');
         assert.ok(content.includes(Buffer.from('xl/worksheets/sheet1.xml')));
         assert.ok(content.includes(Buffer.from('guest-test')));
+        await page.goto(url + '/attendance/9003');
+        await page.getByText('Lista otwarta', { exact: true }).waitFor();
+        const inProgressFile = page.waitForEvent('download');
+        await page.getByRole('button', { name: 'Pobierz XLSX' }).click();
+        const inProgressContents = await readFile(await (await inProgressFile).path());
+        assert.ok(inProgressContents.includes(Buffer.from('Fixture 9003')));
         await page.goto(url + '/adminpanel/kantech?=dev');
         await page.getByRole('heading', { name: 'Testy Kantecha' }).waitFor();
         await page.getByLabel('Alias z czytnika').fill('wi_sync77');
@@ -224,18 +230,52 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByRole('button', { name: 'Zamknij panel zajęć' }).click();
         await lessonHeading.waitFor({ state: 'hidden' });
         await page.goto(url + '/adminpanel/kantech?view=readers');
-        await page.getByLabel('ID czytnika').fill('49998');
-        await page.getByLabel('Nazwa czytnika').fill('Czytnik testowy');
-        await page.getByRole('button', { name: 'Zapisz czytnik' }).click();
-        await page.getByText('Zapisano czytnik 49998.').waitFor();
-        await page.getByRole('button', { name: 'Edytuj czytnik 49998' }).click();
+        const inventory = page.getByRole('complementary', { name: 'Czytniki w SmartService' });
+        const inventoryDoor = (id) => inventory.getByRole('listitem').filter({ hasText: id });
+        await inventoryDoor('49919').getByText('Online', { exact: true }).waitFor();
+        await inventoryDoor('49888').getByText('Offline', { exact: true }).waitFor();
+        await inventoryDoor('49889').getByText('Wyłączony', { exact: true }).waitFor();
+        await inventoryDoor('49890').getByText('Brak stanu', { exact: true }).waitFor();
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const readerForm = page.getByRole('region', { name: 'Dodaj czytniki' });
+        assert.ok((await inventory.boundingBox()).x > (await readerForm.boundingBox()).x);
+        await page.setViewportSize({ width: 390, height: 780 });
+        assert.ok((await inventory.boundingBox()).y > (await readerForm.boundingBox()).y);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+        await page.setViewportSize({ width: 1200, height: 780 });
+        await page.getByLabel('ID wejścia').fill('49998');
+        await page.getByLabel('Nazwa wejścia').fill('Testowe wejście');
+        await page.getByLabel('ID wyjścia').fill('49997');
+        await page.getByLabel('Nazwa wyjścia').fill('Testowe wyjście');
+        await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
+        await page.getByText('Zapisano parę 49998 → 49997.').waitFor();
+        const pair = page.getByRole('list', { name: 'Pary wejścia i wyjścia' }).getByRole('listitem')
+            .filter({ hasText: '49998' });
+        await pair.getByText('→', { exact: true }).waitFor();
+        assert.match(await pair.textContent(), /Wejście.*49998.*→.*Wyjście.*49997/);
+        await page.getByRole('button', { name: 'Edytuj czytnik 49997' }).click();
+        assert.equal(await page.getByLabel('ID wejścia').inputValue(), '49998');
         await page.getByLabel('Budynek').fill('TEST');
         await page.getByLabel('Sala', { exact: true }).fill('401');
-        await page.getByRole('button', { name: 'Zapisz czytnik' }).click();
-        await page.getByText('TEST / 401', { exact: false }).waitFor();
+        await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
+        await page.getByText('TEST / 401', { exact: false }).first().waitFor();
+
+        await page.getByLabel('Jeden czytnik obsługuje wejście i wyjście').check();
+        await page.getByLabel('ID wyjścia').waitFor({ state: 'hidden' });
+        await page.getByLabel('ID wejścia').fill('49995');
+        await page.getByLabel('Nazwa wejścia').fill('Czytnik dwukierunkowy');
+        await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
+        await page.getByText('Zapisano czytnik 49995 jako wejście i wyjście.').waitFor();
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.getByRole('button', { name: 'Usuń czytnik 49995' }).click();
+        await page.getByText('Usunięto czytnik 49995.').waitFor();
         page.once('dialog', (dialog) => dialog.accept());
         await page.getByRole('button', { name: 'Usuń czytnik 49998' }).click();
         await page.getByText('Usunięto czytnik 49998.').waitFor();
+        await pair.waitFor({ state: 'hidden' });
+        page.once('dialog', (dialog) => dialog.accept());
+        await page.getByRole('button', { name: 'Usuń czytnik 49997' }).click();
+        await page.getByText('Usunięto czytnik 49997.').waitFor();
 
         await page.setViewportSize({ width: 1366, height: 800 });
         await page.getByRole('link', { name: 'Logi', exact: true }).click();
@@ -243,7 +283,7 @@ async function browserSmoke(api, simulator, password, directory) {
         const audit = '/api/audit?limit=50';
         const beforeSearch = await waitFor('reader deletion in audit', async () => {
             const { entries } = await (await page.request.get(url + audit)).json();
-            return entries[0]?.target === '49998' && entries[0].action === 'Usunięto czytnik' && entries[0].id;
+            return entries[0]?.target === '49997' && entries[0].action === 'Usunięto czytnik' && entries[0].id;
         });
         assert.ok((await page.request.get(url + '/schedule.php?kind=teacher&query=Prowadzacy')).ok());
         const afterSearch = await (await page.request.get(url + audit)).json();
@@ -355,6 +395,20 @@ async function main() {
         const imported = (await (await request(readersApi, { headers })).json()).readers;
         assert.equal(imported.length, 2);
         assert.ok(imported.every(({ roomNumber }) => !roomNumber));
+        const inventoryApi = readersApi + '/inventory';
+        const inventoryIngress = api + '/internal/kantech/inventory';
+        assert.equal((await request(inventoryApi)).status, 401);
+        assert.equal((await request(inventoryApi, { headers: lecturer })).status, 403);
+        assert.equal((await request(inventoryIngress, { headers, json: [] })).status, 401);
+        assert.equal((await request(inventoryIngress, { headers: service, json: [{ id: '49888', state: 'locked' }] })).status, 400);
+        const inventory = await waitFor('SmartService inventory over HTTP', async () => {
+            const response = await request(inventoryApi, { headers });
+            const snapshot = response.ok && await response.json();
+            return snapshot?.checkedAt && snapshot;
+        });
+        assert.deepEqual(inventory.readers.find(({ id }) => id === '49888'), {
+            id: '49888', label: 'Czytnik zapasowy', state: 'offline',
+        });
         run(['dist/attendance/configure.js', join(fixtures, 'assignments.json')], common);
         const live = async () => {
             const response = await request(api + '/api/kantech/events', { headers });
@@ -411,14 +465,15 @@ async function main() {
         });
         assert.equal(edit.status, 200);
         assert.equal((await edit.json()).name, 'Gość testowy');
-        const simulate = async (alias) => (await request(dev + '/scans', {
-            headers, json: { readerId: '49920', alias, source: 'demo' },
+        const simulate = async (alias, readerId = '49920') => (await request(dev + '/scans', {
+            headers, json: { readerId, alias, source: 'demo' },
         })).json();
         assert.equal((await simulate('WI_SYNC1'))[0].outcome, 'opened');
         const visitor = (await simulate('wi_sync12'))[0];
         assert.equal(visitor.outcome, 'recorded');
         assert.equal(visitor.label, 'Gość testowy');
-        assert.equal((await simulate('WISYNC_1'))[0].outcome, 'closed');
+        assert.equal((await simulate('WISYNC_1'))[0].outcome, 'repeat_tap');
+        assert.equal((await simulate('WISYNC_1', '49922'))[0].outcome, 'closed');
         assert.equal((await list('demo')).status, 404);
         const plan = await (await request(dev + '/schedule?teacherId=test-teacher', { headers })).json();
         assert.ok([...plan.current, ...plan.upcoming].some((item) => item.id === '9001'));
@@ -463,10 +518,19 @@ async function main() {
         assert.equal((await request(api + '/api/attendance/sessions/' + opened.sessionId + '/close', {
             json: {}, headers: lecturer,
         })).status, 404);
+        assert.equal((await request(api + '/api/attendance/sessions/' + opened.sessionId + '/close', {
+            json: {}, headers,
+        })).status, 409);
         assert.ok((await live()).events.some((item) => item.outcome === 'unknown_card' && item.label === 'WISYNC_999'));
         console.log('30-minute boundary, recovery after schedule failure, isolation by room, deduplication and owner access passed.');
 
-        await emit('WISYNC_1', at(-90));
+        await emit('WISYNC_1', at(-120));
+        await emit('WISYNC_1', at(-110), '49922');
+        await emit('WISYNC_2', at(-100), '49921');
+        await waitFor('wrong exit and student exit leave the list open', async () => (await live()).events.some(
+            (item) => item.readerId === '49921' && item.label === 'WISYNC_2' && item.outcome === 'exit_ignored'));
+        assert.equal((await (await list(9001)).json()).status, 'open');
+        await emit('WISYNC_1', at(-90), '49921');
         await waitFor('late closing tap corrects membership', async () => {
             const value = await (await list(9001)).json();
             return value.status === 'closed' && value.totalPresent === 1;
@@ -478,9 +542,13 @@ async function main() {
         });
         await emit('WISYNC_1', at(-10_790));
         await emit('WISYNC_2', at(-10_775));
+        await emit('WISYNC_1', at(-10_000), '49921');
         const historical = await waitFor('closed historical occurrence', async () => {
             const response = await list(9000);
-            if (response.ok) return response.json();
+            if (response.ok) {
+                const value = await response.json();
+                if (value.status === 'closed') return value;
+            }
         });
         assert.equal(historical.status, 'closed');
         assert.equal(historical.closedAt, at(-10_000));
@@ -490,7 +558,7 @@ async function main() {
         worker = launch('dist/attendance/worker.js', buttons.worker);
         await delay(1_600);
         assert.equal((await (await list(9001)).json()).totalScans, 2);
-        console.log('Late scans, early close corrections, automatic close, separate history and worker restart passed.');
+        console.log('Late scans, paired-reader close, separate history and worker restart passed.');
 
         await emit('WISYNC_1', at(-70), '49920');
         await emit('WISYNC_3', at(-40), '49920');
@@ -516,6 +584,8 @@ async function main() {
             headers, method: 'PUT', json: { status: 'ACTIVE' },
         })).status, 204);
         await browserSmoke(api, simulator, ldapPassword, directory);
+        await emit('WISYNC_1', at(-25), '49922');
+        await waitFor('close chosen lesson through its exit', async () => (await (await list(9003)).json()).status === 'closed');
         const count = await (await request(api + '/status')).json();
         assert.ok(count.total >= 1);
         const upload = await request(api + '/api/devices/priority-messages/upload', {
@@ -596,10 +666,23 @@ async function main() {
                 GRANT SELECT (id) ON "AttendanceReader" TO ${workerRole};
                 GRANT INSERT ON "KantechEvent" TO ${workerRole};
                 GRANT SELECT, INSERT, UPDATE ON "KantechReaderStatus" TO ${workerRole};
+                GRANT SELECT, INSERT, UPDATE ON "KantechInventory" TO ${workerRole};
             `);
-            assert.ok((await request(simulator + '/test/schedule', { json: [event(9100, -30, 2_100)] })).ok);
-            await emit('WISYNC_1', at(-12));
-            await emit('WISYNC_3', at(-10));
+            await readingsSql.query('DELETE FROM "KantechInventory"');
+            await readingsSql.query(`INSERT INTO ldap_users (username, display_name, given_name, surname, title)
+                VALUES ($1, $2, $3, $4, 'teacher')`, ['alandz', 'Łądź Alicja', 'Alicja', 'Łądź']);
+            assert.ok((await request(simulator + '/test/schedule', {
+                json: [
+                    { ...event(9100, -30, 2_100), teacher: 'test-accented', group_name: 'L7' },
+                    { ...event(9200, -20, 2_100, '202'), teacher: 'Żółć Jan', imie: 'Jan', nazwisko: 'Żółć' },
+                ],
+            })).ok);
+            await emit('alandz', at(-12));
+            await emit('s054321', at(-10));
+            await emit('S054321', at(-5));
+            await emit('n54321', at(-4));
+            await emit('jzolc', at(-11), '49920');
+            await emit('s23465', at(-9), '49920');
             const unassignedAlias = 'WISYNC_8722';
             await emit(unassignedAlias, at(-8));
             const launchDirectWorker = () => launch('dist/attendance/worker.js', {
@@ -609,6 +692,11 @@ async function main() {
             const rawReadings = () => readingsSql.query('SELECT id, outcome, "captureMode" FROM "KantechReadings" WHERE alias = $1',
                 [unassignedAlias]);
             worker = launchDirectWorker();
+            const directInventory = await waitFor('SmartService inventory over SQL with PlanQR API stopped', async () => {
+                const { rows } = await readingsSql.query('SELECT readers FROM "KantechInventory" WHERE id = 1');
+                return rows[0]?.readers;
+            });
+            assert.ok(directInventory.some(({ id, state }) => id === '49888' && state === 'offline'));
             const raw = await waitFor('raw SQL reading with PlanQR API stopped', async () => (await rawReadings()).rows[0]);
             assert.equal(raw.outcome, 'received');
             assert.equal(raw.captureMode, 'attendance');
@@ -624,20 +712,80 @@ async function main() {
 
             server = startBackend('attendance');
             headers = await authenticate();
-            await waitFor('queued attendance after backend restart', async () => {
-                const response = await list(9100);
-                return response.ok && (await response.json()).totalPresent === 1;
+            const ownerHeaders = credentials('alandz', 'teacher');
+            const session = await waitFor('queued attendance for accented lecturer after backend restart', async () => {
+                const response = await list(9100, ownerHeaders);
+                if (!response.ok) return;
+                const value = await response.json();
+                if (value.totalPresent === 1) return value;
             });
+            assert.equal(session.group, 'L7');
+            assert.equal(session.room, 'TEST 201');
+            assert.equal(session.lecturerDisplayName, 'Łądź Alicja');
+            assert.equal(session.students[0].username, 's054321');
+            assert.equal(session.students[0].albumNumber, '054321');
+            assert.equal(session.totalScans, 1);
+            const preview = api + '/api/attendance/list?lesson_id=9100&teacher=' + encodeURIComponent('Łądź Alicja');
+            assert.equal((await request(preview, { headers })).status, 200);
+            assert.equal((await request(preview, { headers: lecturer })).status, 403);
+            assert.equal((await request(readersApi + '/49921', { method: 'DELETE', headers })).status, 409);
+            const fallbackHeaders = credentials('jzolc', 'teacher');
+            const fallback = await waitFor('room timetable resolves Żółć without a cached LDAP profile', async () => {
+                const response = await list(9200, fallbackHeaders);
+                if (!response.ok) return;
+                const value = await response.json();
+                if (value.totalPresent === 1) return value;
+            });
+            assert.equal(fallback.lecturerDisplayName, 'Żółć Jan');
+            assert.equal(fallback.students[0].username, 's23465');
+            await emit('alandz', at(-3), '49921');
+            await emit('jzolc', at(-2), '49922');
+            await waitFor('lecturer login closes the list at its paired exit', async () =>
+                (await (await list(9100, ownerHeaders)).json()).status === 'closed');
+            await waitFor('close the second paired room', async () =>
+                (await (await list(9200, fallbackHeaders)).json()).status === 'closed');
             const classified = (await rawReadings()).rows[0];
             assert.equal(classified.outcome, 'unknown_card');
             assert.ok((await live()).events.some(({ key, label, outcome }) =>
                 key === raw.id && label === unassignedAlias && outcome === classified.outcome));
+            assert.ok((await live()).events.some(({ label, outcome }) => label === 'n54321' && outcome === 'unknown_card'));
         } finally {
             await readingsSql.end();
         }
         console.log('Restricted PostgreSQL worker, SQL readings during API downtime, deduplication and attendance recovery passed.');
 
-        for (const id of ['49919', '49920']) {
+        const singleReader = { id: '49996', label: 'TEST 403' };
+        const setup = { entry: singleReader, buildingId: 'TEST', roomNumber: '403' };
+        const setupUrl = readersApi + '/setup';
+        assert.equal((await request(setupUrl, { headers, json: { ...setup, exit: singleReader } })).status, 400);
+        assert.equal((await request(setupUrl, {
+            headers, json: { ...setup, exit: { id: '49921', label: 'Istniejące wyjście' } },
+        })).status, 409);
+        assert.ok(!(await (await request(readersApi, { headers })).json()).readers.some(({ id }) => id === singleReader.id));
+        const single = await request(setupUrl, { headers, json: { ...setup, exit: null } });
+        assert.equal(single.status, 201);
+        assert.equal((await single.json()).singleReader, true);
+        assert.ok((await request(simulator + '/test/schedule', { json: [event(9300, -300, 2_100, '403')] })).ok);
+        await emit('WISYNC_1', at(-100), singleReader.id);
+        await emit('s054321', at(-95), singleReader.id);
+        await emit('WISYNC_1', at(-41), singleReader.id);
+        await waitFor('single reader refuses to close after 59 seconds', async () =>
+            (await live()).events.some(({ readerId, outcome }) => readerId === singleReader.id && outcome === 'close_too_soon'));
+        const singleList = await (await list(9300)).json();
+        assert.equal(singleList.status, 'open');
+        assert.equal(singleList.exitReaderId, singleReader.id);
+        assert.equal(singleList.totalPresent, 1);
+        await emit('WISYNC_1', at(-40), singleReader.id);
+        const singleClosed = await waitFor('single reader closes at 60 seconds', async () => {
+            const snapshot = await (await list(9300)).json();
+            return snapshot.status === 'closed' ? snapshot : undefined;
+        });
+        assert.equal(singleClosed.closedAt, at(-40));
+        assert.equal(singleClosed.students[0].username, 's054321');
+        assert.equal(singleClosed.students[0].albumNumber, '054321');
+        console.log('Atomic reader setup and single-reader closing threshold passed.');
+
+        for (const id of ['49919', '49920', '49921', '49922', singleReader.id]) {
             assert.equal((await request(readersApi + '/' + id, { headers, method: 'DELETE' })).status, 204);
         }
         await stop(server);

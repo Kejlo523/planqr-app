@@ -29,10 +29,10 @@ Test-Tap 1
 Test-Tap 2
 Test-Tap 3
 Start-Sleep -Seconds 3
-Test-Tap 1
+Test-Tap 1 '49921'
 ```
 
-Karta `1` należy do prowadzącego, `2` do studenta, `3` do gościa. Domyślne testowe zajęcia mają ID `9001` i zaczynają się pięć minut po starcie symulatora. Pod `/attendance/9001` prowadzący może odświeżyć listę i pobrać XLSX po zamknięciu. `49920` symuluje czytnik w drugiej sali.
+Karta `1` należy do prowadzącego, `2` do studenta, `3` do gościa. Domyślne testowe zajęcia mają ID `9001` i zaczynają się pięć minut po starcie symulatora. Pod `/attendance/9001` lista odświeża się automatycznie, a XLSX jest dostępny od otwarcia. Symulator ma pary `49919 → 49921` i `49920 → 49922` dla dwóch sal.
 
 ## API Kantech
 
@@ -58,7 +58,13 @@ Opcjonalny `key` identyfikuje zdarzenie jako 64 znaki szesnastkowe SHA-256. Przy
 
 W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>` i odświeża listę przez `GET /internal/kantech/readers`.
 
-Administrator LDAP może dodawać, edytować i usuwać czytniki w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. `GET /api/kantech/readers` zwraca listę, `POST /api/kantech/readers` zapisuje `id`, `label`, `buildingId` i `roomNumber`, a `DELETE /api/kantech/readers/:id` usuwa konfigurację. Budynek i sala są potrzebne do zapisu obecności.
+Administrator LDAP konfiguruje wejście i wyjście w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. Parę zapisuje się w jednym formularzu. Wariant **Jeden czytnik obsługuje wejście i wyjście** pozwala prowadzącemu zamknąć listę na tym samym urządzeniu co najmniej 60 sekund po otwarciu. W obu wariantach wpisz budynek i numer sali zgodne z Planem ZUT.
+
+`GET /api/kantech/readers` zwraca listę. `POST /api/kantech/readers/setup` przyjmuje `entry` i `exit` w formacie `{ id, label }`, `buildingId`, `roomNumber` oraz opcjonalne `edit`. Wartość `exit: null` jawnie wybiera tryb jednego czytnika. Dotychczasowy `POST /api/kantech/readers` nadal obsługuje pojedyncze rekordy. `DELETE /api/kantech/readers/:id` usuwa czytnik. W trybie `attendance` prowadzący otwiera listę na wejściu, a uczestnik jest zapisywany najwyżej raz.
+
+W bocznym panelu **Czytniki w SmartService** widać wszystkie urządzenia zwrócone przez `Doors`, także bez przypisania w PlanQR. Worker odświeża listę co minutę, a stan odczytuje z `ComponentFullStatus`. `GET /api/kantech/readers/inventory` zwraca ostatnią listę z czasem odczytu administratorowi LDAP. Jeżeli odczyt się nie powiedzie, panel po dwóch minutach oznacza dane jako nieaktualne.
+
+Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatycznym rozpoznaniem. Karta studenta w formacie `s<numer albumu>` jest rozpoznawana bez przypisania, a cyfry po `s` trafiają na listę jako numer albumu. Dla prowadzącego aplikacja korzysta z imienia i nazwiska z pamięci LDAP, a przy dopasowaniu porównuje też zapis bez polskich znaków. Przy braku profilu sprawdza plan skonfigurowanej sali i wymaga jednoznacznego dopasowania.
 
 Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu backendu, jeśli baza nie ma jeszcze zapisanych czytników.
 
@@ -73,6 +79,7 @@ GRANT USAGE ON SCHEMA public TO planqr_kantech;
 GRANT SELECT (id) ON "AttendanceReader" TO planqr_kantech;
 GRANT INSERT ON "KantechEvent" TO planqr_kantech;
 GRANT SELECT, INSERT, UPDATE ON "KantechReaderStatus" TO planqr_kantech;
+GRANT SELECT, INSERT, UPDATE ON "KantechInventory" TO planqr_kantech;
 ```
 
 Panel Kantecha i raport odczytują te same dane. Kontu raportowemu wystarczy `USAGE` na schemacie i `SELECT` na widoku `"KantechReadings"`.

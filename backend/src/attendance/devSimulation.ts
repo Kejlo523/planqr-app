@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
 import { cardAliasKeys, normalizeCardAlias } from './cardAlias';
-import { findLessons, getRoomKey } from './schedule';
+import { findLecturerLessons, findLessons, getRoomKey } from './schedule';
+import { attendanceIdentity } from './identity';
 import { attendanceDb } from './store';
 import { buildTimeline, Scan } from './timeline';
 
@@ -41,13 +42,18 @@ export function resetSimulation(login: string) {
 
 export async function simulateScan(login: string, input: SimulationInput) {
     const aliases = cardAliasKeys(input.alias);
-    const [reader, cards] = await Promise.all([
-        attendanceDb.attendanceReader.findUnique({ where: { id: input.readerId } }),
+    const [reader, cards, profile] = await Promise.all([
+        attendanceDb.attendanceReader.findUnique({ where: { id: input.readerId }, include: { entryReader: true } }),
         attendanceDb.attendanceCard.findMany({ where: { alias: { in: aliases } } }),
+        attendanceDb.ldapUser.findUnique({ where: { username: input.alias.trim().toLowerCase() } }),
     ]);
     const alias = normalizeCardAlias(input.alias);
-    const card = aliases.map((candidate) => cards.find((item) => item.alias === candidate)).find(Boolean)
-        ?? (input.source === 'demo' ? demoCards.get(alias) : undefined);
+    const binding = aliases.map((candidate) => cards.find((item) => item.alias === candidate)).find(Boolean);
+    const demoCard = input.source === 'demo' ? demoCards.get(alias) : undefined;
+    const card = attendanceIdentity(input.alias, binding, profile)
+        ?? (demoCard && { ...demoCard, isLecturer: Boolean(demoCard.scheduleId) });
+    const entry = reader?.direction === 'EXIT' ? reader.entryReader : reader;
+    const exitReaderId = entry?.singleReader ? entry.id : entry?.exitReaderId ?? null;
     const events = simulations.get(login) ?? [];
     const last = events[events.length - 1];
     const at = new Date(Math.max(Date.now(), last ? Date.parse(last.occurredAt) + 3_000 : 0));
@@ -61,21 +67,25 @@ export async function simulateScan(login: string, input: SimulationInput) {
         event.outcome = 'unknown_card';
     } else if (input.source === 'live' && !reader) {
         event.outcome = 'unknown_reader';
-    } else if (input.source === 'live' && (!reader?.buildingId || !reader.roomNumber)) {
+    } else if (input.source === 'live' && !exitReaderId) {
+        event.outcome = 'reader_without_pair';
+    } else if (input.source === 'live' && (!entry?.buildingId || !entry.roomNumber)) {
         event.outcome = 'reader_without_room';
     } else {
-        const roomKey = reader?.buildingId && reader.roomNumber
-            ? getRoomKey(reader.buildingId, reader.roomNumber) : input.readerId;
+        const roomKey = entry?.buildingId && entry.roomNumber
+            ? getRoomKey(entry.buildingId, entry.roomNumber) : entry?.id ?? input.readerId;
         const demoStart = Date.parse(events.find((item) => item.source === 'demo')?.occurredAt ?? event.occurredAt);
-        const candidates = card.scheduleId ? input.source === 'demo' ? [{
+        const candidates = card.isLecturer && (!exitReaderId || reader?.direction === 'ENTRY') ? input.source === 'demo' ? [{
             id: 'demo', key: 'demo-session', title: 'Zajęcia testowe',
             start: new Date(demoStart).toISOString(),
             end: new Date(demoStart + 60 * 60_000).toISOString(),
-        }] : await findLessons(card.scheduleId, roomKey, at, env.ZUT_SCHEDULE_STUDENT_URL) : [];
+        }] : card.scheduleId ? await findLessons(card.scheduleId, roomKey, at, env.ZUT_ATTENDANCE_SCHEDULE_URL)
+            : await findLecturerLessons(card.login, profile, roomKey, entry!.roomNumber, at) : [];
         const simulatedRoom = JSON.stringify([input.source, roomKey]);
         event.scan = {
-            id, readerId: input.readerId, roomKey: simulatedRoom, roomLabel: reader?.label ?? 'Sala testowa',
+            id, readerId: input.readerId, roomKey: simulatedRoom, roomLabel: entry?.label ?? 'Sala testowa',
             alias, login: card.login, name: card.name, album: card.album, scheduleId: card.scheduleId,
+            readerDirection: exitReaderId ? reader?.direction : null, exitReaderId, isLecturer: card.isLecturer,
             occurredAt: at, candidates, selectedKey: null, resolution: 'no_match',
         };
         const scans = events.flatMap((item) => item.scan?.roomKey === simulatedRoom ? [item.scan] : []);

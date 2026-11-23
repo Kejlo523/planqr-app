@@ -25,6 +25,10 @@ export interface LessonAttendanceList {
   status: AttendanceListStatus;
   sessionId: number;
   dydaktykId: number;
+  title?: string;
+  room?: string;
+  group?: string | null;
+  exitReaderId?: string | null;
   lecturerId: string | null;
   lecturerUsername: string;
   lecturerDisplayName: string;
@@ -47,6 +51,7 @@ interface FetchLessonAttendanceListParams {
   sessionId?: number | null;
   from?: string | null;
   to?: string | null;
+  teacher?: string | null;
   signal?: AbortSignal;
 }
 
@@ -68,11 +73,13 @@ export const fetchLessonAttendanceList = async ({
   sessionId,
   from,
   to,
+  teacher,
   signal,
 }: FetchLessonAttendanceListParams): Promise<LessonAttendanceList | null> => {
   const params = new URLSearchParams();
 
   if (lessonId) params.set("lesson_id", lessonId);
+  if (teacher) params.set("teacher", teacher);
   if (sessionId) {
     params.set("session_id", String(sessionId));
   }

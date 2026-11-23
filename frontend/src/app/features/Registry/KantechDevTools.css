@@ -21,7 +21,77 @@
 .kantech-dev__row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .4rem; }
 .kantech-readers__room { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 .kantech-readers__room > label { min-width: 0; }
+.kantech-readers__endpoint {
+  display: grid;
+  gap: .6rem;
+  min-width: 0;
+  margin: 0;
+  padding: .65rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+}
+.kantech-readers__endpoint legend { padding-inline: .3rem; font-weight: 600; }
 .kantech-readers__actions { display: flex; gap: .45rem; flex-wrap: wrap; }
 .kantech-readers__details { color: var(--admin-text-muted); font-size: .85rem; }
 .kantech-monitor__notice { padding: .65rem 1rem; background: var(--admin-success-soft); }
 @media (max-width: 800px) { .kantech-dev { grid-template-columns: minmax(0, 1fr); } }
+.kantech-readers__pairs {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  display: grid;
+  gap: .5rem;
+}
+
+.kantech-readers__pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: .65rem;
+  align-items: center;
+  padding: .7rem;
+  background: var(--pq-raised);
+  border: 1px solid var(--pq-line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.kantech-readers__pair strong { display: block; }
+.kantech-readers__arrow { color: var(--pq-accent-text); font-size: 1.15rem; }
+
+.kantech-readers-view { container: kantech-readers / inline-size; }
+.kantech-readers-layout { grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(12rem, .68fr); }
+.kantech-inventory { min-width: 0; padding: .9rem; }
+.kantech-inventory h2 { margin-bottom: .4rem; font-size: 1.05rem; }
+.kantech-inventory__meta { color: var(--admin-text-muted); font-size: .78rem; }
+.kantech-inventory__list {
+  max-height: 23rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.kantech-inventory__list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: .5rem;
+  padding: .5rem 0;
+  border-top: 1px solid var(--admin-border);
+  font-size: .82rem;
+}
+.kantech-inventory__reader { display: grid; gap: .15rem; min-width: 0; overflow-wrap: anywhere; }
+.kantech-inventory__reader span { color: var(--admin-text-muted); }
+.kantech-inventory__state { flex-shrink: 0; color: var(--admin-text-muted); }
+.kantech-inventory__state[data-state="online"] { color: var(--admin-success); }
+.kantech-inventory__state[data-state="offline"] { color: var(--admin-danger); }
+.kantech-inventory__state[data-state="disabled"] { color: var(--admin-warning); }
+
+@container kantech-readers (max-width: 52rem) {
+  .kantech-readers-layout { grid-template-columns: minmax(0, 1fr) minmax(12rem, .55fr); }
+  .kantech-readers-layout > :nth-child(2) { grid-row: 2; }
+  .kantech-inventory { grid-area: 1 / 2 / span 2; }
+}
+@container kantech-readers (max-width: 33rem) {
+  .kantech-readers-layout { grid-template-columns: minmax(0, 1fr); }
+  .kantech-inventory { grid-area: auto; }
+}

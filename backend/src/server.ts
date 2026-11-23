@@ -43,6 +43,7 @@ app.use(cors({
     credentials: true // Important for cookies!
 }));
 app.use(applyBasicSecurityHeaders);
+app.use('/internal/kantech', kantechIngress);
 app.use('/api/devices/priority-messages/upload', express.json({ limit: '12mb' }));
 app.use(express.json({ limit: '32kb' }));
 app.use(cookieParser());
@@ -64,7 +65,6 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/kantech/events', kantechEvents);
 app.use('/api/kantech/readers', kantechReaders);
 app.use('/api/kantech/dev', kantechDevRoutes);
-app.use('/internal/kantech', kantechIngress);
 app.use(statusRoutes);
 
 // Start background jobs

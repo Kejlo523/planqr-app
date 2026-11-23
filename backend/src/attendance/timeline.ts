@@ -4,6 +4,10 @@ export const lessonSchema = z.object({
     key: z.string(),
     id: z.string(),
     title: z.string(),
+    group: z.string().nullable().optional(),
+    room: z.string().optional(),
+    teacherScheduleId: z.string().optional(),
+    teacherName: z.string().optional(),
     start: z.string().datetime(),
     end: z.string().datetime(),
 });
@@ -20,6 +24,9 @@ export interface Scan {
     name: string;
     album: string | null;
     scheduleId: string | null;
+    isLecturer?: boolean | null;
+    readerDirection?: 'ENTRY' | 'EXIT' | null;
+    exitReaderId?: string | null;
     occurredAt: Date;
     candidates: Lesson[];
     selectedKey: string | null;
@@ -39,12 +46,13 @@ export interface Session {
     key: string;
     lesson: Lesson;
     opener: Scan;
-    closesAt: Date;
+    closesAt: Date | null;
     members: Map<string, Member>;
 }
 
 const OPEN_WINDOW = 30 * 60_000;
 const READER_DEBOUNCE = 3_000;
+const SINGLE_READER_CLOSE_DELAY = 60_000;
 
 export function buildTimeline(scans: Scan[], manualCloses: ReadonlyMap<string, Date>) {
     const sessions = new Map<string, Session>();
@@ -54,24 +62,47 @@ export function buildTimeline(scans: Scan[], manualCloses: ReadonlyMap<string, D
 
     for (const scan of scans) {
         const at = scan.occurredAt.getTime();
-        const previous = previousTap.get(scan.alias);
-        if (previous !== undefined && at - previous < READER_DEBOUNCE) {
+        if (active?.closesAt && at >= active.closesAt.getTime()) {
+            active = undefined;
+        }
+        const singleReaderClose = active?.opener.exitReaderId === scan.readerId &&
+            active.opener.readerId === scan.readerId && active.opener.login === scan.login &&
+            scan.readerDirection === 'ENTRY';
+        const tapKey = scan.readerDirection ? JSON.stringify([scan.readerId, scan.login]) : scan.alias;
+        const previous = previousTap.get(tapKey);
+        if (!singleReaderClose && previous !== undefined && at - previous < READER_DEBOUNCE) {
             outcomes.set(scan.id, 'repeat_tap');
             continue;
         }
-        if (active && at >= active.closesAt.getTime()) {
-            active = undefined;
-        }
+        const isLecturer = scan.isLecturer ?? Boolean(scan.scheduleId);
         if (active) {
-            previousTap.set(scan.alias, at);
-            if (active.opener.login === scan.login) {
+            previousTap.set(tapKey, at);
+            const owner = active.opener.login === scan.login;
+            const exitReaderId = active.opener.exitReaderId;
+            if (singleReaderClose && at - active.opener.occurredAt.getTime() < SINGLE_READER_CLOSE_DELAY) {
+                outcomes.set(scan.id, 'close_too_soon');
+                continue;
+            }
+            if (owner && (singleReaderClose || !exitReaderId || (scan.readerDirection === 'EXIT' && scan.readerId === exitReaderId))) {
                 active.closesAt = scan.occurredAt;
                 active = undefined;
                 outcomes.set(scan.id, 'closed');
                 continue;
             }
+            if (exitReaderId && (scan.readerDirection !== 'ENTRY' || scan.readerId !== active.opener.readerId)) {
+                outcomes.set(scan.id, scan.readerDirection === 'EXIT' ? 'exit_ignored' : 'wrong_entry_reader');
+                continue;
+            }
+            if (exitReaderId && (owner || isLecturer)) {
+                outcomes.set(scan.id, owner ? 'repeat_tap' : 'room_in_use');
+                continue;
+            }
             const member = active.members.get(scan.login);
             if (member) {
+                if (exitReaderId) {
+                    outcomes.set(scan.id, 'repeat_tap');
+                    continue;
+                }
                 member.lastAt = scan.occurredAt;
                 member.count++;
             } else {
@@ -81,6 +112,10 @@ export function buildTimeline(scans: Scan[], manualCloses: ReadonlyMap<string, D
                 });
             }
             outcomes.set(scan.id, 'recorded');
+            continue;
+        }
+        if (scan.readerDirection === 'EXIT') {
+            outcomes.set(scan.id, 'exit_ignored');
             continue;
         }
 
@@ -93,7 +128,7 @@ export function buildTimeline(scans: Scan[], manualCloses: ReadonlyMap<string, D
         if (!lesson) {
             const noLesson = scan.resolution === 'pending' ? 'pending' : 'no_match';
             outcomes.set(scan.id, eligible.length > 1 ? 'choose_lesson'
-                : scan.scheduleId ? noLesson : 'no_session');
+                : isLecturer ? noLesson : 'no_session');
             continue;
         }
         const key = JSON.stringify([scan.roomKey, scan.login, lesson.key]);
@@ -103,9 +138,9 @@ export function buildTimeline(scans: Scan[], manualCloses: ReadonlyMap<string, D
         }
         const plannedEnd = new Date(lesson.end);
         const manualEnd = manualCloses.get(key);
-        const closesAt = manualEnd && manualEnd < plannedEnd ? manualEnd : plannedEnd;
+        const closesAt = scan.exitReaderId ? null : manualEnd && manualEnd < plannedEnd ? manualEnd : plannedEnd;
         active = { key, lesson, opener: scan, closesAt, members: new Map() };
-        previousTap.set(scan.alias, at);
+        previousTap.set(tapKey, at);
         sessions.set(key, active);
         outcomes.set(scan.id, 'opened');
     }

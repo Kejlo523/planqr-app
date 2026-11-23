@@ -1277,6 +1277,7 @@ export default function LecturerCalendar() {
     try {
       const attendanceList = await fetchLessonAttendanceList({
         lessonId: lesson.id,
+        teacher: isAdminPreviewMode ? previewTeacherName : null,
         doorId,
         sessionId,
         from: attendanceWindow.from,
@@ -1292,7 +1293,7 @@ export default function LecturerCalendar() {
           ...current,
           [lesson.id]: attendanceList
             ? applyAttendanceListToDraft(baseDraft, attendanceList)
-            : createAttendanceDraft(lesson.id, lesson.room),
+            : { ...createAttendanceDraft(lesson.id, lesson.room), loadedAt: new Date().toISOString() },
         };
       });
     } catch (error) {
@@ -1698,6 +1699,7 @@ export default function LecturerCalendar() {
     <LessonAttendancePanel
       layout="panel"
       lessonId={selectedLesson.id}
+      readOnly={isAdminPreviewMode}
       isLoading={isAttendanceLoading}
       error={attendanceError}
       draft={

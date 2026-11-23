@@ -7,6 +7,13 @@ const formatter = new Intl.DateTimeFormat('sv-SE', {
 });
 const scans = new Map();
 const sessions = new Set();
+const doors = new Map([
+    ['49919', { name: 'Wejście testowe', status: 'Device Online' }],
+    ['49920', { name: 'Wyjście testowe', status: 'Device Online' }],
+    ['49888', { name: 'Czytnik zapasowy', status: 'Device Offline' }],
+    ['49889', { name: 'Czytnik wyłączony', status: 'Reader disabled' }],
+    ['49890', { name: 'Czytnik bez stanu', status: 'Door closed' }],
+]);
 let scheduleAvailable = true;
 let readerAvailable = true;
 const clock = Date.now();
@@ -41,13 +48,13 @@ const routes = async (request, response) => {
             const at = value.at === undefined ? new Date() : new Date(value.at);
             const alias = String(value.alias ?? '').trim();
             const cardAlias = /^WI[_-]*SYNC[_-]*(\d{1,8})$/i.exec(alias);
-            if (!/^\d{1,8}$/.test(reader) || !cardAlias || isNaN(+at)) {
-                send(response, 400, { message: 'Pass readerId, WISYNC_<number>, and optional ISO time' });
+            if (!/^\d{1,8}$/.test(reader) || (!cardAlias && !/^[a-z][a-z0-9-]{2,63}$/i.test(alias)) || isNaN(+at)) {
+                send(response, 400, { message: 'Pass readerId, a card alias, and optional ISO time' });
                 return;
             }
             const buffer = scans.get(reader) ?? [];
             const status = value.granted === false ? 'Access denied' : 'Access granted';
-            const card = cardAlias[1].padStart(4, '0');
+            const card = (cardAlias?.[1] ?? '0').padStart(4, '0');
             buffer.unshift(formatter.format(at) + ' ' + status + ' 0000:' + card + ' ' + alias);
             scans.set(reader, buffer.slice(0, 100));
             send(response, 201, { alias, reader, at: at.toISOString() });
@@ -82,9 +89,12 @@ const routes = async (request, response) => {
                 send(response, 400, { message: 'Required teacher search parameters are missing' });
                 return;
             }
-            const name = 'Prowadzacy Testowy';
-            send(response, 200, name.toLowerCase().includes(search)
-                ? [{ id: 'test-teacher', label: name, item: name }] : []);
+            const teachers = [
+                ['test-teacher', 'Prowadzacy Testowy'],
+                ['test-accented', 'Łądź Alicja'],
+            ];
+            send(response, 200, teachers.filter(([, name]) => name.toLowerCase().includes(search))
+                .map(([id, name]) => ({ id, label: name, item: name })));
             return;
         }
         if (url.pathname.startsWith('/SmartService/')) {
@@ -106,6 +116,22 @@ const routes = async (request, response) => {
             if (url.pathname.endsWith('/Logout')) {
                 sessions.delete(key);
                 send(response, 200, '<Reply/>', 'text/xml');
+                return;
+            }
+            if (url.pathname.endsWith('/Doors')) {
+                const items = [...doors].map(([id, { name }]) => `<item><key><string>${id}</string></key>` +
+                    `<value><SmartLinkDataValue><Value>${name}</Value></SmartLinkDataValue></value></item>`);
+                send(response, 200, '<ArrayOfSmartLinkDataRow><SmartLinkDataRow>' + items.join('') +
+                    '</SmartLinkDataRow></ArrayOfSmartLinkDataRow>', 'text/xml');
+                return;
+            }
+            if (url.pathname.startsWith('/SmartService/ComponentFullStatus/')) {
+                const door = doors.get(url.pathname.split('/').at(-1));
+                if (!door) {
+                    send(response, 404, { message: 'Fixture door not found' });
+                    return;
+                }
+                send(response, 200, `<ArrayOfLineStatus><LineStatus><Status>${door.status}</Status></LineStatus></ArrayOfLineStatus>`, 'text/xml');
                 return;
             }
             if (url.pathname.endsWith('/LastDoorAccess')) {

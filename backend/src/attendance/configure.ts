@@ -1,12 +1,15 @@
 import { readFile } from 'node:fs/promises';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, ReaderDirection } from '@prisma/client';
 import { z } from 'zod';
 import { normalizeRoom } from './schedule';
 import { normalizeCardAlias } from './cardAlias';
 
 const text = z.string().trim().min(1).max(128);
 const configuration = z.object({
-    readers: z.array(z.object({ id: text.max(64), buildingId: text, roomNumber: text, label: text })),
+    readers: z.array(z.object({
+        id: text.max(64), buildingId: text, roomNumber: text, label: text,
+        direction: z.nativeEnum(ReaderDirection).optional(), exitReaderId: text.max(64).optional(),
+    })),
     cards: z.array(z.object({
         alias: text, login: text, name: text, scheduleId: text.optional(), album: text.optional(),
     })),
@@ -22,10 +25,13 @@ async function main() {
             ...(values.readers.length ? [prisma.kantechReaderSetup.upsert({
                 where: { id: 1 }, create: { id: 1 }, update: {},
             })] : []),
-            ...values.readers.map((reader) => {
+            ...values.readers.map(({ exitReaderId: _exit, ...reader }) => {
                 const data = { ...reader, buildingId: normalizeRoom(reader.buildingId), roomNumber: normalizeRoom(reader.roomNumber) };
                 return prisma.attendanceReader.upsert({ where: { id: reader.id }, create: data, update: data });
             }),
+            ...values.readers.flatMap(({ id, exitReaderId }) => exitReaderId ? [
+                prisma.attendanceReader.update({ where: { id }, data: { exitReaderId } }),
+            ] : []),
             ...values.cards.map((card) => {
                 const data = {
                     ...card, alias: normalizeCardAlias(card.alias), login: card.login.toLowerCase(),

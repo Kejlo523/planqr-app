@@ -1,8 +1,9 @@
 import { AttendanceScan, KantechEvent, Prisma, PrismaClient } from '@prisma/client';
 import { env } from '../config/env';
-import { findLessons, getRoomKey } from './schedule';
+import { findLecturerLessons, findLessons, getRoomKey } from './schedule';
 import { buildTimeline, Lesson, lessonSchema } from './timeline';
 import { cardAliasKeys } from './cardAlias';
+import { attendanceIdentity } from './identity';
 
 export const attendanceDb = new PrismaClient();
 const transactionOptions = { timeout: 20_000 };
@@ -11,13 +12,17 @@ export async function lockRoom(tx: Prisma.TransactionClient, roomKey: string) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${roomKey}, 0))`;
 }
 
+export async function lockReaderConfiguration(tx: Prisma.TransactionClient) {
+    await lockRoom(tx, 'planqr:reader-pairs');
+}
+
 export function readCandidates(scan: AttendanceScan): Lesson[] {
     return lessonSchema.array().parse(scan.candidates ?? []);
 }
 
 export async function projectRoom(tx: Prisma.TransactionClient, roomKey: string) {
     const scans = await tx.attendanceScan.findMany({
-        where: { roomKey }, orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+        where: { roomKey }, orderBy: [{ occurredAt: 'asc' }, { readerDirection: 'asc' }, { isLecturer: 'desc' }, { id: 'asc' }],
     });
     const existing = await tx.attendanceSession.findMany({
         where: { roomKey }, include: { members: true },
@@ -45,16 +50,23 @@ export async function projectRoom(tx: Prisma.TransactionClient, roomKey: string)
         const { opener, lesson } = session;
         const previous = byKey.get(session.key);
         const data = {
-            lessonId: lesson.id, title: lesson.title,
+            lessonId: lesson.id, title: lesson.title, lessonGroup: lesson.group ?? null,
+            teacherScheduleId: lesson.teacherScheduleId ?? opener.scheduleId,
             lessonStart: new Date(lesson.start), lessonEnd: new Date(lesson.end),
-            ownerLogin: opener.login, ownerName: opener.name,
-            roomKey, readerId: opener.readerId, roomLabel: opener.roomLabel,
+            ownerLogin: opener.login, ownerName: lesson.teacherName || opener.name,
+            roomKey, readerId: opener.readerId, roomLabel: lesson.room || opener.roomLabel,
+            exitReaderId: opener.exitReaderId ?? null,
             openedAt: opener.occurredAt, closesAt: session.closesAt, voided: false,
         };
         const stored = previous && !previous.voided
             && previous.openedAt.getTime() === data.openedAt.getTime()
-            && previous.closesAt.getTime() === data.closesAt.getTime()
+            && previous.closesAt?.getTime() === data.closesAt?.getTime()
             && previous.readerId === data.readerId
+            && previous.exitReaderId === data.exitReaderId
+            && previous.roomLabel === data.roomLabel
+            && previous.lessonGroup === data.lessonGroup
+            && previous.teacherScheduleId === data.teacherScheduleId
+            && previous.ownerName === data.ownerName
             ? previous
             : previous
                 ? await tx.attendanceSession.update({ where: { id: previous.id }, data })
@@ -79,31 +91,40 @@ export async function projectRoom(tx: Prisma.TransactionClient, roomKey: string)
 }
 
 async function ingestScans(tx: Prisma.TransactionClient, readerId: string, events: KantechEvent[]) {
-    const [reader, assignments] = await Promise.all([
-        tx.attendanceReader.findUnique({ where: { id: readerId } }),
+    await lockReaderConfiguration(tx);
+    const [reader, assignments, profiles] = await Promise.all([
+        tx.attendanceReader.findUnique({ where: { id: readerId }, include: { entryReader: true } }),
         tx.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
+        tx.ldapUser.findMany({ where: { username: { in: [...new Set(events.map((event) => event.alias.trim().toLowerCase()))] } } }),
     ]);
-    const roomKey = reader?.buildingId && reader.roomNumber ? getRoomKey(reader.buildingId, reader.roomNumber) : '';
+    const entry = reader?.direction === 'EXIT' ? reader.entryReader : reader;
+    const exitReaderId = entry?.singleReader ? entry.id : entry?.exitReaderId ?? null;
+    const roomKey = entry?.buildingId && entry.roomNumber ? getRoomKey(entry.buildingId, entry.roomNumber) : '';
     const cards = new Map(assignments.map((card) => [card.alias, card]));
+    const profilesByLogin = new Map(profiles.map((profile) => [profile.username, profile]));
     const results = new Map<string, string[]>();
     const data: Prisma.AttendanceScanCreateManyInput[] = [];
     const cutover = env.KANTECH_ACTIVE_FROM ? new Date(env.KANTECH_ACTIVE_FROM).getTime() : Infinity;
     for (const event of events) {
-        const card = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
+        const binding = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
+        const card = attendanceIdentity(event.alias, binding, profilesByLogin.get(event.alias.trim().toLowerCase()));
         const { occurredAt } = event;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
             : !event.granted ? 'access_denied' : !card ? 'unknown_card'
+            : !exitReaderId && event.captureMode === 'attendance' ? 'reader_without_pair'
             : !roomKey && event.captureMode === 'attendance' ? 'reader_without_room' : null;
         let outcome = invalid ?? 'observed';
-        if (reader && card && occurredAt && !invalid && event.captureMode === 'attendance') {
+        if (reader?.direction && entry && card && occurredAt && !invalid && event.captureMode === 'attendance') {
             outcome = 'outside_cutover';
             if (+occurredAt >= cutover && +occurredAt <= Date.now() + 60_000) {
                 outcome = 'received';
                 data.push({
-                    id: event.id, readerId, roomKey, buildingId: reader.buildingId, roomNumber: reader.roomNumber,
-                    roomLabel: reader.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
+                    id: event.id, readerId, roomKey, buildingId: entry.buildingId, roomNumber: entry.roomNumber,
+                    roomLabel: entry.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
+                    readerDirection: reader.direction, exitReaderId, isLecturer: card.isLecturer,
                     scheduleId: card.scheduleId, occurredAt, receivedAt: event.receivedAt,
-                    resolution: card.scheduleId ? 'pending' : 'none', retryAt: card.scheduleId ? new Date() : null,
+                    resolution: card.isLecturer && reader.direction === 'ENTRY' ? 'pending' : 'none',
+                    retryAt: card.isLecturer && reader.direction === 'ENTRY' ? new Date() : null,
                 });
             }
         }
@@ -167,10 +188,13 @@ export async function resolvePendingScans() {
         take: 10,
     });
     for (const scan of scans) {
-        if (!scan.scheduleId) continue;
         let candidates: Lesson[];
         try {
-            candidates = await findLessons(scan.scheduleId, scan.roomKey, scan.occurredAt);
+            candidates = scan.scheduleId
+                ? await findLessons(scan.scheduleId, scan.roomKey, scan.occurredAt)
+                : await findLecturerLessons(scan.login, await attendanceDb.ldapUser.findUnique({
+                    where: { username: scan.login }, select: { givenName: true, surname: true },
+                }), scan.roomKey, scan.roomNumber, scan.occurredAt);
         } catch {
             await attendanceDb.attendanceScan.updateMany({
                 where: { id: scan.id, resolution: 'pending' },

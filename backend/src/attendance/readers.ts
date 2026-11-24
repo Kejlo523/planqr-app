@@ -16,8 +16,6 @@ export const readerInput = z.object({
     roomNumber: roomField,
     direction: z.nativeEnum(ReaderDirection).nullable().optional(),
     pairedReaderId: readerIdSchema.nullable().optional(),
-}).refine(({ buildingId, roomNumber }) => Boolean(buildingId) === Boolean(roomNumber), {
-    message: 'Podaj budynek i salę albo zostaw oba pola puste.',
 }).transform((reader) => ({
     ...reader,
     buildingId: normalizeRoom(reader.buildingId),
@@ -31,8 +29,6 @@ export const readerSetupInput = z.object({
     buildingId: roomField,
     roomNumber: roomField,
     edit: z.boolean().default(false),
-}).refine(({ buildingId, roomNumber }) => Boolean(buildingId) === Boolean(roomNumber), {
-    message: 'Podaj budynek i salę albo zostaw oba pola puste.',
 }).refine(({ entry, exit }) => entry.id !== exit?.id, {
     message: 'Wejście i wyjście muszą mieć różne ID. Dla jednego urządzenia wybierz tryb jednego czytnika.',
 });
@@ -106,12 +102,7 @@ export async function saveReader(input: z.infer<typeof readerInput>) {
         if (peer && [peer.exitReaderId, peer.entryReader?.id].some((partner) => partner && partner !== id)) {
             throw new ReaderConfigurationError('Drugi czytnik należy już do innej pary.');
         }
-        if (peer?.roomNumber && location.roomNumber &&
-            (peer.buildingId !== location.buildingId || peer.roomNumber !== location.roomNumber)) {
-            throw new ReaderConfigurationError('Czytniki w parze muszą wskazywać tę samą salę.');
-        }
-        if (current && (nextDirection !== current.direction || nextPeer !== oldPeer ||
-            current.buildingId !== location.buildingId || current.roomNumber !== location.roomNumber)) {
+        if (current && (nextDirection !== current.direction || nextPeer !== oldPeer)) {
             await requireIdleReaders(tx, [id, ...(oldPeer ? [oldPeer] : []), ...(nextPeer ? [nextPeer] : [])]);
         }
         if (current?.entryReader && (nextDirection !== 'EXIT' || nextPeer !== oldPeer)) {
@@ -154,7 +145,6 @@ export async function saveReaderSetup({ entry, exit, buildingId, roomNumber, edi
         const exitReaderId = exit?.id ?? null;
         const singleReader = !exit;
         if (currentEntry && (currentEntry.exitReaderId !== exitReaderId || currentEntry.singleReader !== singleReader ||
-            currentEntry.buildingId !== location.buildingId || currentEntry.roomNumber !== location.roomNumber ||
             currentEntry.direction !== 'ENTRY')) {
             const affected = [entry.id, currentEntry.exitReaderId, exitReaderId].filter((id): id is string => id !== null);
             await requireIdleReaders(tx, affected);

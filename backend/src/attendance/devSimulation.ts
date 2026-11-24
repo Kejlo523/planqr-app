@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
 import { cardAliasKeys, normalizeCardAlias, normalizeCardLogin } from './cardAlias';
-import { findLecturerLessons, findLessons, getRoomKey } from './schedule';
+import { findLecturerLessons, findLessons } from './schedule';
 import { attendanceIdentity } from './identity';
 import { attendanceDb } from './store';
 import { buildTimeline, Scan } from './timeline';
@@ -69,19 +69,15 @@ export async function simulateScan(login: string, input: SimulationInput) {
         event.outcome = 'unknown_reader';
     } else if (input.source === 'live' && !exitReaderId) {
         event.outcome = 'reader_without_pair';
-    } else if (input.source === 'live' && (!entry?.buildingId || !entry.roomNumber)) {
-        event.outcome = 'reader_without_room';
     } else {
-        const roomKey = entry?.buildingId && entry.roomNumber
-            ? getRoomKey(entry.buildingId, entry.roomNumber) : entry?.id ?? input.readerId;
         const demoStart = Date.parse(events.find((item) => item.source === 'demo')?.occurredAt ?? event.occurredAt);
         const candidates = card.isLecturer && (!exitReaderId || reader?.direction === 'ENTRY') ? input.source === 'demo' ? [{
             id: 'demo', key: 'demo-session', title: 'Zajęcia testowe',
             start: new Date(demoStart).toISOString(),
             end: new Date(demoStart + 60 * 60_000).toISOString(),
-        }] : card.scheduleId ? await findLessons(card.scheduleId, roomKey, at, env.ZUT_ATTENDANCE_SCHEDULE_URL)
-            : await findLecturerLessons(card.login, profile, roomKey, entry!.roomNumber, at) : [];
-        const simulatedRoom = JSON.stringify([input.source, roomKey]);
+        }] : card.scheduleId ? await findLessons(card.scheduleId, at, env.ZUT_ATTENDANCE_SCHEDULE_URL)
+            : await findLecturerLessons(card.login, profile, at) : [];
+        const simulatedRoom = JSON.stringify([input.source, entry?.id ?? input.readerId]);
         event.scan = {
             id, readerId: input.readerId, roomKey: simulatedRoom, roomLabel: entry?.label ?? 'Sala testowa',
             alias, login: card.login, name: card.name, album: card.album, scheduleId: card.scheduleId,

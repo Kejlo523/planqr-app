@@ -5,9 +5,10 @@ import { normalizeRoom } from './schedule';
 import { normalizeCardAlias } from './cardAlias';
 
 const text = z.string().trim().min(1).max(128);
+const locationText = z.string().trim().max(128).default('');
 const configuration = z.object({
     readers: z.array(z.object({
-        id: text.max(64), buildingId: text, roomNumber: text, label: text,
+        id: text.max(64), buildingId: locationText, roomNumber: locationText, label: text,
         direction: z.nativeEnum(ReaderDirection).optional(), exitReaderId: text.max(64).optional(),
     })),
     cards: z.array(z.object({

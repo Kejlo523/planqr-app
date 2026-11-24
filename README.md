@@ -60,15 +60,15 @@ W zakładce **Odczyty na żywo** administrator LDAP może zmienić tryb przez pr
 
 W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>` i odświeża listę przez `GET /internal/kantech/readers`.
 
-Administrator LDAP konfiguruje wejście i wyjście w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. Parę zapisuje się w jednym formularzu. Wariant **Jeden czytnik obsługuje wejście i wyjście** pozwala prowadzącemu zamknąć listę na tym samym urządzeniu co najmniej 60 sekund po otwarciu. W obu wariantach wpisz budynek i numer sali zgodne z Planem ZUT.
+Administrator LDAP konfiguruje wejście i wyjście w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. Parę zapisuje się w jednym formularzu. Wariant **Jeden czytnik obsługuje wejście i wyjście** pozwala prowadzącemu zamknąć listę na tym samym urządzeniu co najmniej 60 sekund po otwarciu. Budynek i sala służą do opisu lokalizacji czytników.
 
 `GET /api/kantech/readers` zwraca listę. `POST /api/kantech/readers/setup` przyjmuje `entry` i `exit` w formacie `{ id, label }`, `buildingId`, `roomNumber` oraz opcjonalne `edit`. Wartość `exit: null` jawnie wybiera tryb jednego czytnika. Dotychczasowy `POST /api/kantech/readers` nadal obsługuje pojedyncze rekordy. `DELETE /api/kantech/readers/:id` usuwa czytnik. W trybie `attendance` prowadzący otwiera listę na wejściu, a uczestnik jest zapisywany najwyżej raz.
 
 W bocznym panelu **Czytniki w SmartService** widać wszystkie urządzenia zwrócone przez `Doors`, także bez przypisania w PlanQR. Worker odświeża listę co minutę, a stan odczytuje z `ComponentFullStatus`. `GET /api/kantech/readers/inventory` zwraca ostatnią listę z czasem odczytu administratorowi LDAP. Jeżeli odczyt się nie powiedzie, panel po dwóch minutach oznacza dane jako nieaktualne.
 
-Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatycznym rozpoznaniem. Karta studenta w formacie `s<numer albumu>` jest rozpoznawana bez przypisania, a cyfry po `s` trafiają na listę jako numer albumu. Dla prowadzącego aplikacja korzysta z imienia i nazwiska z pamięci LDAP, a przy dopasowaniu porównuje też zapis bez polskich znaków. Przy braku profilu sprawdza plan skonfigurowanej sali i wymaga jednoznacznego dopasowania.
+Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatycznym rozpoznaniem. Karta studenta w formacie `s<numer albumu>` jest rozpoznawana bez przypisania, a cyfry po `s` trafiają na listę jako numer albumu. Dla prowadzącego aplikacja korzysta z imienia i nazwiska z pamięci LDAP. Przy braku profilu szuka w Planie ZUT jednoznacznego dopasowania inicjału i nazwiska z loginu. Zajęcia wybiera z planu prowadzącego według godziny odbicia karty.
 
-Odczyt karty z adresem w domenie ZUT jest rozpoznawany po loginie przed `@`. Przy przypisywaniu sali użyj kodu budynku z Planu ZUT, np. `WI_WI1` dla sali `129`. Istniejące wpisy `W1` i `WI1` pasują do kodu `WI_WI1`.
+Odczyt karty z adresem w domenie ZUT jest rozpoznawany po loginie przed `@`. ID czytnika wejściowego wskazuje listę, do której trafiają odbicia uczestników. ID sparowanego wyjścia pozwala prowadzącemu ją zamknąć.
 
 Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu backendu, jeśli baza nie ma jeszcze zapisanych czytników.
 
@@ -104,7 +104,7 @@ Administrator LDAP może otworzyć `/adminpanel/kantech?dev=1` albo `/adminpanel
 
 Wybierz ostatnio odczytany alias lub wpisz go ręcznie. `WI_SYNC1`, `wi-sync-1` i `WISYNC_1` oznaczają to samo przypisanie. Uczestnika można zapisać według nazwy, loginu lub numeru albumu. Dla prowadzącego wybierz osobę z Planu ZUT i podaj jej login w PlanQR. Podgląd pokazuje bieżące i najbliższe zajęcia, a zapisane przypisania można edytować.
 
-W symulacji można wywołać odbicie gotowej karty albo wpisać własny alias. Przykładowe zajęcia pozwalają sprawdzić sekwencję prowadzący → uczestnik → prowadzący także poza godzinami zajęć. Tryb Plan ZUT używa bieżącego planu dla przypisanej sali. Wyniki symulacji są tymczasowe i nie trafiają do list obecności.
+W symulacji można wywołać odbicie gotowej karty albo wpisać własny alias. Przykładowe zajęcia pozwalają sprawdzić sekwencję prowadzący → uczestnik → prowadzący także poza godzinami zajęć. Tryb Plan ZUT używa bieżącego planu prowadzącego. Wyniki symulacji są tymczasowe.
 
 ## Migracje i testy
 

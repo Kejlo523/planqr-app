@@ -92,6 +92,8 @@ const routes = async (request, response) => {
             const teachers = [
                 ['test-teacher', 'Prowadzacy Testowy'],
                 ['test-accented', 'Łądź Alicja'],
+                ['Żółć Jan', 'Żółć Jan'],
+                ['Nowak Jan', 'Nowak Jan'],
             ];
             send(response, 200, teachers.filter(([, name]) => name.toLowerCase().includes(search))
                 .map(([id, name]) => ({ id, label: name, item: name })));

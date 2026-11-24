@@ -6,31 +6,8 @@ import { ZutServices } from '../services/ZutServices';
 import { env } from '../config/env';
 import type { Lesson } from './timeline';
 import { CAMPUS_ZONE, parseCampusTime } from './scheduleTime';
-import { normalizeCardLogin } from './cardAlias';
 
 export const normalizeRoom = (value: string) => value.normalize('NFKC').trim().toUpperCase();
-export const getRoomKey = (buildingId: string, roomNumber: string) =>
-    JSON.stringify([normalizeRoom(buildingId), normalizeRoom(roomNumber)]);
-
-const savedRoom = z.tuple([z.string(), z.string()]);
-const buildingAliases = new Map([
-    ['W1', 'WI_WI1'], ['WI1', 'WI_WI1'], ['WI WI1', 'WI_WI1'],
-    ['WI2', 'WI_WI2'], ['WI WI2', 'WI_WI2'],
-]);
-
-function timetableRoomKey(roomKey: string) {
-    try {
-        const parsed = savedRoom.safeParse(JSON.parse(roomKey));
-        if (parsed.success) {
-            const [building, room] = parsed.data;
-            const canonical = buildingAliases.get(building);
-            if (canonical) return getRoomKey(canonical, room);
-        }
-    } catch {
-        // Historical records can still be compared against their original room key.
-    }
-    return roomKey;
-}
 
 const scheduleEntry = z.object({
     id: z.union([z.string(), z.number()]).optional(),
@@ -44,7 +21,6 @@ const scheduleEntry = z.object({
     room: z.string().optional(),
     worker_title: z.string().optional(),
     group_name: z.string().nullish(),
-    login: z.string().nullish(),
     imie: z.string().nullish(),
     nazwisko: z.string().nullish(),
 });
@@ -56,19 +32,15 @@ export function scheduleEventId(event: { id?: string | number; start?: string; r
     return parseInt(hash.substring(0, 8), 16) % 2147483647;
 }
 
-type ScheduledLesson = Lesson & {
-    roomKey: string | null; room: string; login?: string; givenName?: string; surname?: string;
-};
-
-async function readLessons(scheduleId: string, at: Date, source?: string, daysAhead = 2, kind = 'worker'): Promise<ScheduledLesson[]> {
+async function readLessons(scheduleId: string, at: Date, source?: string, daysAhead = 2): Promise<Lesson[]> {
     const campusDate = DateTime.fromJSDate(at, { zone: CAMPUS_ZONE });
     const response = await new ZutServices(source).getSchedule(
         scheduleId,
-        kind,
+        'worker',
         campusDate.minus({ days: 1 }).toISODate()!,
         campusDate.plus({ days: daysAhead }).toISODate()!,
     );
-    const matches = new Map<string, ScheduledLesson>();
+    const matches = new Map<string, Lesson>();
     for (const entry of response) {
         const parsed = scheduleEntry.safeParse(entry);
         if (!parsed.success) continue;
@@ -81,33 +53,20 @@ async function readLessons(scheduleId: string, at: Date, source?: string, daysAh
         if (!start || !end || start >= end) continue;
         const id = String(scheduleEventId(row));
         const key = JSON.stringify([id, start.toISOString()]);
-        const roomKey = row._building_id && row._room_number
-            ? getRoomKey(row._building_id, row._room_number) : null;
-        const lessonKey = kind === 'worker' ? [key, roomKey] : [key, roomKey, row.login, row.imie, row.nazwisko];
-        matches.set(JSON.stringify(lessonKey), {
+        matches.set(key, {
             key, id, title: row.title, group: row.group_name?.trim() || null,
             start: start.toISOString(), end: end.toISOString(),
-            roomKey, room: row.room?.trim() || [row._building_id, row._room_number].filter(Boolean).join(' '),
-            teacherScheduleId: kind === 'worker' ? scheduleId : undefined,
+            room: row.room?.trim() || [row._building_id, row._room_number].filter(Boolean).join(' '),
+            teacherScheduleId: scheduleId,
             teacherName: row.nazwisko && row.imie ? `${row.nazwisko.trim()} ${row.imie.trim()}` : undefined,
-            login: row.login ? normalizeCardLogin(row.login) : undefined,
-            givenName: row.imie?.trim(), surname: row.nazwisko?.trim(),
         });
     }
     return [...matches.values()].sort((a, b) => a.start.localeCompare(b.start) || a.key.localeCompare(b.key));
 }
 
-export async function findLessons(scheduleId: string, roomKey: string, at: Date, source = env.ZUT_ATTENDANCE_SCHEDULE_URL): Promise<Lesson[]> {
-    return eligibleLessons(await readLessons(scheduleId, at, source), roomKey, at).map(publicLesson);
-}
-
-const publicLesson = ({ roomKey: _roomKey, login: _login, givenName: _given, surname: _surname, ...lesson }: ScheduledLesson) => lesson;
-
-function eligibleLessons(lessons: ScheduledLesson[], roomKey: string, at: Date) {
-    const window = lessons.filter((lesson) => +at >= Date.parse(lesson.start) - 30 * 60_000 && +at < Date.parse(lesson.end));
-    const exact = window.filter((lesson) => lesson.roomKey === roomKey);
-    const canonical = timetableRoomKey(roomKey);
-    const eligible = exact.length || canonical === roomKey ? exact : window.filter((lesson) => lesson.roomKey === canonical);
+export async function findLessons(scheduleId: string, at: Date, source = env.ZUT_ATTENDANCE_SCHEDULE_URL): Promise<Lesson[]> {
+    const lessons = await readLessons(scheduleId, at, source);
+    const eligible = lessons.filter((lesson) => +at >= Date.parse(lesson.start) - 30 * 60_000 && +at < Date.parse(lesson.end));
     const current = eligible.filter((lesson) => Date.parse(lesson.start) <= +at);
     return current.length ? current : eligible;
 }
@@ -117,52 +76,67 @@ export const foldName = (value: string) => value.toLowerCase().normalize('NFKD')
 
 export type LecturerName = { givenName: string | null; surname: string | null } | null;
 
-export async function findLecturerLessons(
-    login: string, identity: LecturerName, roomKey: string, roomNumber: string, at: Date,
-    source = env.ZUT_ATTENDANCE_SCHEDULE_URL ?? env.ZUT_SCHEDULE_STUDENT_URL,
-) {
-    if (identity?.surname && identity.givenName) {
+const polishLetters: Record<string, string> = {
+    a: 'aą', c: 'cć', e: 'eę', l: 'lł', n: 'nń', o: 'oó', s: 'sś', z: 'zźż',
+};
+
+function surnameSearchVariants(surname: string) {
+    // Use a short fragment with the fewest possible spellings for the accent-sensitive search.
+    const width = Math.min(3, surname.length);
+    let fewest: string[] | undefined;
+    for (let offset = 0; offset + width <= surname.length; offset++) {
+        const letters = [...surname.slice(offset, offset + width)];
+        const variants = letters.reduce<string[]>((terms, letter) =>
+            terms.flatMap((term) => [...(polishLetters[letter] ?? letter)].map((spelling) => term + spelling)), ['']);
+        if (!fewest || variants.length < fewest.length) fewest = variants;
+    }
+    return fewest ?? [];
+}
+
+function lecturerCardMatches(name: string, login: string, identity: LecturerName) {
+    if (identity?.givenName && identity.surname) {
         const given = foldName(identity.givenName);
         const surname = foldName(identity.surname);
-        const searchUrl = new URL('schedule.php', source);
-        const response = await axios.get(searchUrl.href, {
-            params: { kind: 'teacher', query: identity.surname },
-            timeout: 5_000, maxRedirects: 0,
-        });
-        if (!Array.isArray(response.data)) throw new Error('Invalid teacher search response');
-        const ids = new Set<string>();
-        for (const row of response.data) {
-            const name = typeof row?.item === 'string' ? row.item.trim() : '';
-            if (![surname + given, given + surname].includes(foldName(name))) continue;
-            const id = typeof row.id === 'string' || typeof row.id === 'number' ? String(row.id) : name;
-            if (id) ids.add(id);
-        }
-        if (ids.size > 1) return [];
-        if (ids.size === 1) return findLessons([...ids][0], roomKey, at, source);
+        return [surname + given, given + surname].includes(foldName(name));
     }
+    const split = /^(.*)\s+(\S+)$/.exec(name);
+    return Boolean(split && foldName(split[2])[0] + foldName(split[1]) === login);
+}
 
-    // Plan ZUT search is accent-sensitive. A missing profile can still be matched against the room's timetable.
-    const roomLessons = eligibleLessons(await readLessons(roomNumber, at, source, 2, 'room'), roomKey, at);
-    const matches = roomLessons.filter((lesson) => {
-        if (lesson.login) return lesson.login === login;
-        if (!lesson.givenName || !lesson.surname) return false;
-        if (identity?.givenName && identity.surname) {
-            return foldName(lesson.givenName) === foldName(identity.givenName)
-                && foldName(lesson.surname) === foldName(identity.surname);
-        }
-        return foldName(lesson.givenName)[0] + foldName(lesson.surname) === foldName(login);
+async function searchLecturerSchedules(url: string, query: string, login: string, identity: LecturerName) {
+    const response = await axios.get(url, {
+        params: { kind: 'teacher', query }, timeout: 5_000, maxRedirects: 0,
     });
-    const names = new Set(matches.map(({ givenName, surname, login: rowLogin }) =>
-        givenName && surname ? foldName(surname + givenName) : rowLogin));
-    if (names.size !== 1) return [];
-    return matches.map((lesson) => ({
-        ...publicLesson(lesson),
-        teacherScheduleId: lesson.teacherName,
-    }));
+    if (!Array.isArray(response.data)) throw new Error('Invalid teacher search response');
+    return response.data.flatMap((row) => {
+        const name = typeof row?.item === 'string' ? row.item.trim() : '';
+        if (!name || !lecturerCardMatches(name, login, identity)) return [];
+        const id = typeof row.id === 'string' || typeof row.id === 'number' ? String(row.id) : name;
+        return id ? [id] : [];
+    });
+}
+
+export async function findLecturerLessons(
+    login: string, identity: LecturerName, at: Date,
+    source = env.ZUT_ATTENDANCE_SCHEDULE_URL ?? env.ZUT_SCHEDULE_STUDENT_URL,
+) {
+    const normalizedLogin = foldName(login);
+    const surname = identity?.surname?.trim() || normalizedLogin.slice(1);
+    if (!surname) return [];
+    const url = new URL('schedule.php', source).href;
+    const ids = new Set(await searchLecturerSchedules(url, surname, normalizedLogin, identity));
+    if (!ids.size) {
+        const queries = surnameSearchVariants(foldName(surname)).filter((query) => query && query !== surname);
+        for (const result of await Promise.all(queries.map((query) => searchLecturerSchedules(url, query, normalizedLogin, identity)))) {
+            for (const id of result) ids.add(id);
+        }
+    }
+    const [id] = ids;
+    return ids.size === 1 ? findLessons(id, at, source) : [];
 }
 
 export async function getTeacherSchedule(scheduleId: string, at: Date) {
-    const lessons = (await readLessons(scheduleId, at, undefined, 7)).map(publicLesson);
+    const lessons = await readLessons(scheduleId, at, undefined, 7);
     return {
         at: at.toISOString(),
         current: lessons.filter(({ start, end }) => Date.parse(start) <= +at && +at < Date.parse(end)),

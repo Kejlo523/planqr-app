@@ -438,7 +438,7 @@ async function main() {
         assert.equal((await request(api + '/api/kantech/events', { headers: service, json: {} })).status, 401);
         const newReader = { id: '49999', label: 'Czytnik dodany ręcznie' };
         assert.equal((await request(readersApi, { headers: authenticatedLecturer, json: newReader })).status, 403);
-        assert.equal((await request(readersApi, { headers, json: { ...newReader, buildingId: 'WI1' } })).status, 400);
+        assert.equal((await request(readersApi, { headers, json: { ...newReader, buildingId: 'WI1' } })).status, 200);
         assert.equal((await request(readersApi, { headers, json: newReader })).status, 200);
         await waitFor('new reader polled without restarting the worker', async () =>
             (await live()).readers.some(({ id, state }) => id === newReader.id && state === 'connected'));
@@ -529,7 +529,7 @@ async function main() {
             json: {}, headers,
         })).status, 409);
         assert.ok((await live()).events.some((item) => item.outcome === 'unknown_card' && item.label === 'WISYNC_999'));
-        console.log('30-minute boundary, recovery after schedule failure, isolation by room, deduplication and owner access passed.');
+        console.log('30-minute boundary, recovery after schedule failure, isolation by reader, deduplication and owner access passed.');
 
         await emit('WISYNC_1', at(-120));
         await emit('WISYNC_1', at(-110), '49922');
@@ -567,6 +567,9 @@ async function main() {
         assert.equal((await (await list(9001)).json()).totalScans, 2);
         console.log('Late scans, paired-reader close, separate history and worker restart passed.');
 
+        assert.ok((await request(simulator + '/test/schedule', {
+            json: [event(9002, 300, 2_400, '202'), event(9003, 600, 2_700, '202')],
+        })).ok);
         await emit('WISYNC_1', at(-70), '49920');
         await emit('WISYNC_3', at(-40), '49920');
         const pending = await waitFor('ambiguous choices', async () => {
@@ -738,7 +741,7 @@ async function main() {
             assert.equal((await request(preview, { headers: lecturer })).status, 403);
             assert.equal((await request(readersApi + '/49921', { method: 'DELETE', headers })).status, 409);
             const fallbackHeaders = credentials('jzolc', 'teacher');
-            const fallback = await waitFor('room timetable resolves Żółć without a cached LDAP profile', async () => {
+            const fallback = await waitFor('Plan ZUT directory resolves Żółć without a cached LDAP profile', async () => {
                 const response = await list(9200, fallbackHeaders);
                 if (!response.ok) return;
                 const value = await response.json();
@@ -763,7 +766,7 @@ async function main() {
         console.log('Restricted PostgreSQL worker, SQL readings during API downtime, deduplication and attendance recovery passed.');
 
         const singleReader = { id: '49996', label: 'TEST 403' };
-        const setup = { entry: singleReader, buildingId: 'TEST', roomNumber: '403' };
+        const setup = { entry: singleReader };
         const setupUrl = readersApi + '/setup';
         assert.equal((await request(setupUrl, { headers, json: { ...setup, exit: singleReader } })).status, 400);
         assert.equal((await request(setupUrl, {
@@ -813,33 +816,67 @@ async function main() {
             entry: { id: '49919', label: 'Wejście 129' }, exit: { id: '49921', label: 'Wyjście 129' },
             buildingId: 'W1', roomNumber: '129', edit: true,
         } })).status, 200);
+        assert.equal((await request(setupUrl, { headers, json: {
+            entry: { id: '49920', label: 'Drugie wejście' }, exit: { id: '49922', label: 'Drugie wyjście' },
+            buildingId: 'W1', roomNumber: '129', edit: true,
+        } })).status, 200);
         const fixtureRoom = {
             ...event(9400, -300, 1_800, '129'), start: aroundSwitch(-60_000), end: aroundSwitch(1_800_000),
-            _building_id: 'WI_WI1', room: 'WI WI1- 129',
+            _building_id: 'WI_WI2', _room_number: '306', room: 'WI WI2- 306',
         };
         assert.ok((await request(simulator + '/test/schedule', {
             json: [fixtureRoom,
-                { ...fixtureRoom, id: 9401, _building_id: 'WI_WI2', room: 'WI WI2- 129' },
+                { ...fixtureRoom, id: 9401, teacher: 'test-teacher-2' },
                 { ...fixtureRoom, id: 9402, teacher: 'Nowak Jan', imie: 'Jan', nazwisko: 'Nowak' }],
         })).ok);
         await emit('s94001', aroundSwitch(-2_000));
         await emit('dnowak@zut.edu.pl', aroundSwitch(1_000));
         await emit('WISYNC_1', aroundSwitch(2_000));
         await emit('s94002', aroundSwitch(3_000));
-        await waitFor('dynamic mode through PostgreSQL while backend started in observe', async () => {
+        await emit('WISYNC_4', aroundSwitch(2_000), '49920');
+        await emit('s94004', aroundSwitch(3_000), '49920');
+        const moved = await waitFor('a lesson in a different building opens through PostgreSQL', async () => {
             const response = await list(9400);
-            return response.ok && (await response.json()).students.some(({ username }) => username === 's94002');
+            if (!response.ok) return;
+            const value = await response.json();
+            return value.students.some(({ username }) => username === 's94002') && value;
         });
-        assert.equal((await list(9401)).status, 404);
+        assert.equal(moved.room, 'WI WI2- 306');
+        const other = await waitFor('second entry with identical location has its own attendance', async () => {
+            const response = await list(9401, lecturer);
+            if (!response.ok) return;
+            const value = await response.json();
+            return value.students.some(({ username }) => username === 's94004') && value;
+        });
+        assert.deepEqual(moved.students.map(({ username }) => username), ['s94002']);
+        assert.deepEqual(other.students.map(({ username }) => username), ['s94004']);
         assert.ok((await live()).events.some(({ label, outcome }) => label === 's94001' && outcome === 'outside_cutover'));
         await waitFor('campus login does not match another lecturer with the same surname', async () =>
             (await live()).events.some(({ label, outcome }) => label === 'dnowak@zut.edu.pl' && outcome === 'no_match'));
         const submitReport = (alias, offset, readerId) => request(api + '/internal/kantech', {
             headers: service, json: { alias, readerId, granted: true, occurredAt: aroundSwitch(offset) },
         });
+        const legacyDb = new Client({ connectionString: database.href });
+        const legacyScope = JSON.stringify(['W1', '129']);
+        await legacyDb.connect();
+        try {
+            await legacyDb.query('BEGIN');
+            await legacyDb.query('UPDATE "AttendanceScan" SET "roomKey" = $1 WHERE "roomKey" = $2 AND "occurredAt" >= $3',
+                [legacyScope, 'reader:49919', activeFrom]);
+            await legacyDb.query('UPDATE "AttendanceSession" SET "roomKey" = $1, key = $2 WHERE id = $3',
+                [legacyScope, JSON.stringify([legacyScope, 'pilot-admin', JSON.stringify(['9400', fixtureRoom.start])]), moved.sessionId]);
+            await legacyDb.query('COMMIT');
+        } finally {
+            await legacyDb.end();
+        }
         assert.equal((await submitReport('WISYNC_1', 4_000, '49921')).status, 204);
-        await waitFor('HTTP worker report closes the list in dynamic attendance mode', async () =>
-            (await (await list(9400)).json()).status === 'closed');
+        await waitFor('exit tap closes the already open legacy list', async () => {
+            const value = await (await list(9400)).json();
+            return value.sessionId === moved.sessionId && value.status === 'closed';
+        });
+        assert.equal((await (await list(9401, lecturer)).json()).status, 'open');
+        assert.equal((await submitReport('WISYNC_4', 4_000, '49922')).status, 204);
+        await waitFor('other list closes through its own exit', async () => (await (await list(9401, lecturer)).json()).status === 'closed');
         assert.deepEqual(await (await changeMode('observe')).json(), { mode: 'observe', activeFrom: null });
         assert.equal((await submitReport('s94003', 5_000, '49919')).status, 204);
         await waitFor('readings return to observation', async () =>

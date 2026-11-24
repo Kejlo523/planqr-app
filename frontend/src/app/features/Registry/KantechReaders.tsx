@@ -213,13 +213,11 @@ export default function KantechReaders() {
                     </div>
                     <div className="kantech-readers__room">
                       <label>Budynek<input type="text" value={form.buildingId} maxLength={128} placeholder="np. WI_WI1"
-                        required={Boolean(form.roomNumber.trim())}
                         onChange={(event) => setForm({ ...form, buildingId: event.target.value })} /></label>
                       <label>Sala<input type="text" value={form.roomNumber} maxLength={128}
-                        required={Boolean(form.buildingId.trim())}
                         onChange={(event) => setForm({ ...form, roomNumber: event.target.value })} /></label>
                     </div>
-                    <p className="kantech-readers__details">Do zapisu obecności podaj budynek i salę według Planu ZUT.</p>
+                    <p className="kantech-readers__details">Budynek i sala to opcjonalny opis lokalizacji czytnika.</p>
                     <div className="kantech-readers__actions kantech-readers-form__footer">
                       <button type="button" className="admin-button admin-button--ghost"
                         disabled={busy} onClick={reset}>Anuluj</button>
@@ -237,7 +235,7 @@ export default function KantechReaders() {
                         <div className="kantech-reader-row__summary">
                           {!exit && <ReaderName reader={reader} />}
                           <span className="kantech-readers__details">
-                            {reader.roomNumber ? reader.buildingId + " / " + reader.roomNumber : "Bez przypisanej sali"}
+                            {[reader.buildingId, reader.roomNumber].filter(Boolean).join(" / ") || "Bez opisu lokalizacji"}
                             {!exit && (reader.singleReader ? " · Wejście i wyjście"
                               : reader.direction ? " · " + directionLabels[reader.direction] + " bez pary" : " · Bez kierunku")}
                           </span>

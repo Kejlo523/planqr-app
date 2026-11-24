@@ -64,7 +64,8 @@ if (!(Test-Path -LiteralPath $envFileApp)) {
         "WORKER_SECRET_TOKEN=$(New-LocalSecret)"
     ) | Set-Content -LiteralPath $envFileApp -Encoding ASCII
 }
-if ((Get-Content -LiteralPath $envFileApp) -notcontains "DATABASE_URL=$localDatabase") {
+$localAppSettings = Get-Content -LiteralPath $envFileApp
+if ($localAppSettings -notcontains "DATABASE_URL=$localDatabase") {
     throw 'The local configuration must use the database created by this script.'
 }
 $localDirectory = Join-Path $app '.local'
@@ -102,6 +103,12 @@ try {
     Invoke-Docker @appCompose run --rm --no-deps backend npm run migrate
     $seedAdmin = 'INSERT INTO admins (id, username, "updatedAt") VALUES (''fixture-admin'', ''pilot-admin'', NOW()) ON CONFLICT (username) DO NOTHING'
     Invoke-Docker @dbCompose exec -T db psql -v ON_ERROR_STOP=1 -U zut -d planqr-db-prod -c $seedAdmin
+    $fixtureAdminLine = $localAppSettings | Where-Object { $_ -like 'LDAP_FIXTURE_ADMIN_LOGIN=*' } | Select-Object -Last 1
+    if ($fixtureAdminLine -match '^LDAP_FIXTURE_ADMIN_LOGIN=([a-z][a-z0-9.-]{0,62})$') {
+        $fixtureAdmin = $Matches[1].ToLowerInvariant()
+        $seedFixtureAdmin = 'INSERT INTO admins (id, username, "updatedAt") VALUES (gen_random_uuid(), ''{0}'', NOW()) ON CONFLICT (username) DO NOTHING' -f $fixtureAdmin
+        Invoke-Docker @dbCompose exec -T db psql -v ON_ERROR_STOP=1 -U zut -d planqr-db-prod -c $seedFixtureAdmin
+    }
     $fixturesConfigured = Invoke-Docker @dbCompose exec -T db psql -v ON_ERROR_STOP=1 -U zut -d planqr-db-prod -tA -c 'SELECT EXISTS (SELECT 1 FROM "KantechReaderSetup")'
     if ($fixturesConfigured -eq 'f') {
         Invoke-Docker @appCompose run --rm --no-deps -v "$($PSScriptRoot):/fixtures:ro" backend npm run attendance:configure -- /fixtures/assignments.json

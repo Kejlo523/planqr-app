@@ -685,11 +685,11 @@ async function main() {
                     { ...event(9200, -20, 2_100, '202'), teacher: 'Żółć Jan', imie: 'Jan', nazwisko: 'Żółć' },
                 ],
             })).ok);
-            await emit('alandz', at(-12));
+            await emit('alandz@zut.edu.pl', at(-12));
             await emit('s054321', at(-10));
             await emit('S054321', at(-5));
             await emit('n54321', at(-4));
-            await emit('jzolc', at(-11), '49920');
+            await emit('jzolc@wi.zut.edu.pl', at(-11), '49920');
             await emit('s23465', at(-9), '49920');
             const unassignedAlias = 'WISYNC_8722';
             await emit(unassignedAlias, at(-8));
@@ -809,17 +809,31 @@ async function main() {
         assert.equal((await live()).mode, 'attendance');
         const cutover = Date.parse(activeFrom);
         const aroundSwitch = (offset) => new Date(cutover + offset).toISOString();
+        assert.equal((await request(setupUrl, { headers, json: {
+            entry: { id: '49919', label: 'Wejście 129' }, exit: { id: '49921', label: 'Wyjście 129' },
+            buildingId: 'W1', roomNumber: '129', edit: true,
+        } })).status, 200);
+        const fixtureRoom = {
+            ...event(9400, -300, 1_800, '129'), start: aroundSwitch(-60_000), end: aroundSwitch(1_800_000),
+            _building_id: 'WI_WI1', room: 'WI WI1- 129',
+        };
         assert.ok((await request(simulator + '/test/schedule', {
-            json: [{ ...event(9400, -300, 1_800), start: aroundSwitch(-60_000), end: aroundSwitch(1_800_000) }],
+            json: [fixtureRoom,
+                { ...fixtureRoom, id: 9401, _building_id: 'WI_WI2', room: 'WI WI2- 129' },
+                { ...fixtureRoom, id: 9402, teacher: 'Nowak Jan', imie: 'Jan', nazwisko: 'Nowak' }],
         })).ok);
         await emit('s94001', aroundSwitch(-2_000));
+        await emit('dnowak@zut.edu.pl', aroundSwitch(1_000));
         await emit('WISYNC_1', aroundSwitch(2_000));
         await emit('s94002', aroundSwitch(3_000));
         await waitFor('dynamic mode through PostgreSQL while backend started in observe', async () => {
             const response = await list(9400);
             return response.ok && (await response.json()).students.some(({ username }) => username === 's94002');
         });
+        assert.equal((await list(9401)).status, 404);
         assert.ok((await live()).events.some(({ label, outcome }) => label === 's94001' && outcome === 'outside_cutover'));
+        await waitFor('campus login does not match another lecturer with the same surname', async () =>
+            (await live()).events.some(({ label, outcome }) => label === 'dnowak@zut.edu.pl' && outcome === 'no_match'));
         const submitReport = (alias, offset, readerId) => request(api + '/internal/kantech', {
             headers: service, json: { alias, readerId, granted: true, occurredAt: aroundSwitch(offset) },
         });

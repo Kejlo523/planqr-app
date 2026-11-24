@@ -68,6 +68,8 @@ W bocznym panelu **Czytniki w SmartService** widać wszystkie urządzenia zwróc
 
 Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatycznym rozpoznaniem. Karta studenta w formacie `s<numer albumu>` jest rozpoznawana bez przypisania, a cyfry po `s` trafiają na listę jako numer albumu. Dla prowadzącego aplikacja korzysta z imienia i nazwiska z pamięci LDAP, a przy dopasowaniu porównuje też zapis bez polskich znaków. Przy braku profilu sprawdza plan skonfigurowanej sali i wymaga jednoznacznego dopasowania.
 
+Odczyt karty z adresem w domenie ZUT jest rozpoznawany po loginie przed `@`. Przy przypisywaniu sali użyj kodu budynku z Planu ZUT, np. `WI_WI1` dla sali `129`. Istniejące wpisy `W1` i `WI1` pasują do kodu `WI_WI1`.
+
 Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu backendu, jeśli baza nie ma jeszcze zapisanych czytników.
 
 ### Połączenie workera z PostgreSQL

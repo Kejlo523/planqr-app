@@ -48,7 +48,7 @@ const routes = async (request, response) => {
             const at = value.at === undefined ? new Date() : new Date(value.at);
             const alias = String(value.alias ?? '').trim();
             const cardAlias = /^WI[_-]*SYNC[_-]*(\d{1,8})$/i.exec(alias);
-            if (!/^\d{1,8}$/.test(reader) || (!cardAlias && !/^[a-z][a-z0-9-]{2,63}$/i.test(alias)) || isNaN(+at)) {
+            if (!/^\d{1,8}$/.test(reader) || (!cardAlias && !/^[a-z][a-z0-9-]{2,63}(?:@[a-z0-9-]+(?:\.[a-z0-9-]+)+)?$/i.test(alias)) || isNaN(+at)) {
                 send(response, 400, { message: 'Pass readerId, a card alias, and optional ISO time' });
                 return;
             }
@@ -150,7 +150,10 @@ const routes = async (request, response) => {
 const port = Number(process.env.PORT ?? 18700);
 const host = process.env.HOST ?? '127.0.0.1';
 if (process.env.LDAP_FIXTURE_PORT) {
-    require('./ldap-fixture.cjs')(Number(process.env.LDAP_FIXTURE_PORT), host, process.env.LDAP_FIXTURE_PASSWORD);
+    require('./ldap-fixture.cjs')(Number(process.env.LDAP_FIXTURE_PORT), host, process.env.LDAP_FIXTURE_PASSWORD, {
+        login: process.env.LDAP_FIXTURE_ADMIN_LOGIN,
+        password: process.env.LDAP_FIXTURE_ADMIN_PASSWORD,
+    });
 }
 http.createServer((request, response) => void routes(request, response).catch(() => {
     send(response, 400, { message: 'Invalid fixture request' });

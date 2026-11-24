@@ -27,6 +27,8 @@ services:
       HOST: 0.0.0.0
       LDAP_FIXTURE_PORT: "1389"
       LDAP_FIXTURE_PASSWORD: ${LDAP_FIXTURE_PASSWORD:-}
+      LDAP_FIXTURE_ADMIN_LOGIN: ${LDAP_FIXTURE_ADMIN_LOGIN:-}
+      LDAP_FIXTURE_ADMIN_PASSWORD: ${LDAP_FIXTURE_ADMIN_PASSWORD:-}
     volumes:
       - ./local:/fixtures:ro
     ports:

@@ -5,5 +5,12 @@ export function normalizeCardAlias(value: string) {
 }
 
 export function cardAliasKeys(value: string) {
-    return [...new Set([normalizeCardAlias(value), value.trim().toUpperCase()])];
+    return [...new Set([
+        normalizeCardAlias(value), value.trim().toUpperCase(), normalizeCardAlias(normalizeCardLogin(value)),
+    ])];
+}
+
+export function normalizeCardLogin(value: string) {
+    const login = value.normalize('NFKC').trim().toLowerCase();
+    return /^([^@\s]+)@(?:[a-z0-9-]+\.)*zut\.edu\.pl$/.exec(login)?.[1] ?? login;
 }

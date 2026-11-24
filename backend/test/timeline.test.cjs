@@ -4,7 +4,8 @@ const { createServer } = require('node:http');
 const { buildTimeline } = require('../dist/attendance/timeline');
 const { parseReaderSnapshot, parseSmartServiceDoors, parseSmartServiceDoorState, SmartService } = require('../dist/attendance/smartService');
 const { parseCampusTime } = require('../dist/attendance/scheduleTime');
-const { normalizeCardAlias } = require('../dist/attendance/cardAlias');
+const { cardAliasKeys, normalizeCardAlias, normalizeCardLogin } = require('../dist/attendance/cardAlias');
+const { attendanceIdentity } = require('../dist/attendance/identity');
 
 const start = '2026-11-18T10:00:00.000Z';
 const end = '2026-11-18T11:00:00.000Z';
@@ -15,6 +16,14 @@ const scan = (id, time, login, candidates = [], selectedKey = null) => ({
     occurredAt: new Date(time), candidates, selectedKey, resolution: candidates.length ? 'matched' : 'no_match',
 });
 const time = (value) => '2026-11-18T' + value + '.000Z';
+
+test('campus card email aliases keep explicit bindings and resolve to known login forms', () => {
+    assert.deepEqual(cardAliasKeys(' TestLecturer@wi.zut.edu.pl '), ['TESTLECTURER@WI.ZUT.EDU.PL', 'TESTLECTURER']);
+    assert.equal(normalizeCardLogin(' Dnowak@ZUT.edu.pl '), 'dnowak');
+    assert.equal(attendanceIdentity('S054321@zut.edu.pl')?.album, '054321');
+    assert.equal(attendanceIdentity('testlecturer@other.example'), null);
+    assert.equal(attendanceIdentity('testlecturer@fakezut.edu.pl'), null);
+});
 
 test('opens at the 30 minute boundary, closes once and retains the first participant tap', () => {
     const result = buildTimeline([

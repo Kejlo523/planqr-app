@@ -6,10 +6,31 @@ import { ZutServices } from '../services/ZutServices';
 import { env } from '../config/env';
 import type { Lesson } from './timeline';
 import { CAMPUS_ZONE, parseCampusTime } from './scheduleTime';
+import { normalizeCardLogin } from './cardAlias';
 
 export const normalizeRoom = (value: string) => value.normalize('NFKC').trim().toUpperCase();
 export const getRoomKey = (buildingId: string, roomNumber: string) =>
     JSON.stringify([normalizeRoom(buildingId), normalizeRoom(roomNumber)]);
+
+const savedRoom = z.tuple([z.string(), z.string()]);
+const buildingAliases = new Map([
+    ['W1', 'WI_WI1'], ['WI1', 'WI_WI1'], ['WI WI1', 'WI_WI1'],
+    ['WI2', 'WI_WI2'], ['WI WI2', 'WI_WI2'],
+]);
+
+function timetableRoomKey(roomKey: string) {
+    try {
+        const parsed = savedRoom.safeParse(JSON.parse(roomKey));
+        if (parsed.success) {
+            const [building, room] = parsed.data;
+            const canonical = buildingAliases.get(building);
+            if (canonical) return getRoomKey(canonical, room);
+        }
+    } catch {
+        // Historical records can still be compared against their original room key.
+    }
+    return roomKey;
+}
 
 const scheduleEntry = z.object({
     id: z.union([z.string(), z.number()]).optional(),
@@ -69,7 +90,8 @@ async function readLessons(scheduleId: string, at: Date, source?: string, daysAh
             roomKey, room: row.room?.trim() || [row._building_id, row._room_number].filter(Boolean).join(' '),
             teacherScheduleId: kind === 'worker' ? scheduleId : undefined,
             teacherName: row.nazwisko && row.imie ? `${row.nazwisko.trim()} ${row.imie.trim()}` : undefined,
-            login: row.login?.trim().toLowerCase(), givenName: row.imie?.trim(), surname: row.nazwisko?.trim(),
+            login: row.login ? normalizeCardLogin(row.login) : undefined,
+            givenName: row.imie?.trim(), surname: row.nazwisko?.trim(),
         });
     }
     return [...matches.values()].sort((a, b) => a.start.localeCompare(b.start) || a.key.localeCompare(b.key));
@@ -82,9 +104,10 @@ export async function findLessons(scheduleId: string, roomKey: string, at: Date,
 const publicLesson = ({ roomKey: _roomKey, login: _login, givenName: _given, surname: _surname, ...lesson }: ScheduledLesson) => lesson;
 
 function eligibleLessons(lessons: ScheduledLesson[], roomKey: string, at: Date) {
-    const eligible = lessons
-        .filter((lesson) => lesson.roomKey === roomKey
-            && +at >= Date.parse(lesson.start) - 30 * 60_000 && +at < Date.parse(lesson.end));
+    const window = lessons.filter((lesson) => +at >= Date.parse(lesson.start) - 30 * 60_000 && +at < Date.parse(lesson.end));
+    const exact = window.filter((lesson) => lesson.roomKey === roomKey);
+    const canonical = timetableRoomKey(roomKey);
+    const eligible = exact.length || canonical === roomKey ? exact : window.filter((lesson) => lesson.roomKey === canonical);
     const current = eligible.filter((lesson) => Date.parse(lesson.start) <= +at);
     return current.length ? current : eligible;
 }

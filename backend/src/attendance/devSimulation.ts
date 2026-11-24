@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env';
-import { cardAliasKeys, normalizeCardAlias } from './cardAlias';
+import { cardAliasKeys, normalizeCardAlias, normalizeCardLogin } from './cardAlias';
 import { findLecturerLessons, findLessons, getRoomKey } from './schedule';
 import { attendanceIdentity } from './identity';
 import { attendanceDb } from './store';
@@ -45,7 +45,7 @@ export async function simulateScan(login: string, input: SimulationInput) {
     const [reader, cards, profile] = await Promise.all([
         attendanceDb.attendanceReader.findUnique({ where: { id: input.readerId }, include: { entryReader: true } }),
         attendanceDb.attendanceCard.findMany({ where: { alias: { in: aliases } } }),
-        attendanceDb.ldapUser.findUnique({ where: { username: input.alias.trim().toLowerCase() } }),
+        attendanceDb.ldapUser.findUnique({ where: { username: normalizeCardLogin(input.alias) } }),
     ]);
     const alias = normalizeCardAlias(input.alias);
     const binding = aliases.map((candidate) => cards.find((item) => item.alias === candidate)).find(Boolean);

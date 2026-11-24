@@ -2,7 +2,7 @@ import { AttendanceScan, KantechEvent, Prisma, PrismaClient } from '@prisma/clie
 import { env } from '../config/env';
 import { findLecturerLessons, findLessons, getRoomKey } from './schedule';
 import { buildTimeline, Lesson, lessonSchema } from './timeline';
-import { cardAliasKeys } from './cardAlias';
+import { cardAliasKeys, normalizeCardLogin } from './cardAlias';
 import { attendanceIdentity } from './identity';
 
 export const attendanceDb = new PrismaClient();
@@ -95,7 +95,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
     const [reader, assignments, profiles] = await Promise.all([
         tx.attendanceReader.findUnique({ where: { id: readerId }, include: { entryReader: true } }),
         tx.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
-        tx.ldapUser.findMany({ where: { username: { in: [...new Set(events.map((event) => event.alias.trim().toLowerCase()))] } } }),
+        tx.ldapUser.findMany({ where: { username: { in: [...new Set(events.map((event) => normalizeCardLogin(event.alias)))] } } }),
     ]);
     const entry = reader?.direction === 'EXIT' ? reader.entryReader : reader;
     const exitReaderId = entry?.singleReader ? entry.id : entry?.exitReaderId ?? null;
@@ -107,7 +107,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
     const legacyCutover = env.KANTECH_ACTIVE_FROM ? Date.parse(env.KANTECH_ACTIVE_FROM) : Infinity;
     for (const event of events) {
         const binding = cardAliasKeys(event.alias).map((alias) => cards.get(alias)).find(Boolean);
-        const card = attendanceIdentity(event.alias, binding, profilesByLogin.get(event.alias.trim().toLowerCase()));
+        const card = attendanceIdentity(event.alias, binding, profilesByLogin.get(normalizeCardLogin(event.alias)));
         const { occurredAt } = event;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
             : !event.granted ? 'access_denied' : !card ? 'unknown_card'

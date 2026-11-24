@@ -212,7 +212,7 @@ export default function KantechReaders() {
                       </fieldset>}
                     </div>
                     <div className="kantech-readers__room">
-                      <label>Budynek<input type="text" value={form.buildingId} maxLength={128}
+                      <label>Budynek<input type="text" value={form.buildingId} maxLength={128} placeholder="np. WI_WI1"
                         required={Boolean(form.roomNumber.trim())}
                         onChange={(event) => setForm({ ...form, buildingId: event.target.value })} /></label>
                       <label>Sala<input type="text" value={form.roomNumber} maxLength={128}

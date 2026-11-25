@@ -5,6 +5,8 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { AuthRequest, requireLecturerAccess } from '../middlewares/authMiddleware';
 import { CAMPUS_ZONE } from '../attendance/scheduleTime';
+import { getSimulationAttendance } from '../attendance/devSimulation';
+import { env } from '../config/env';
 import { isReaderGroupScope } from '../attendance/timeline';
 import { LdapDirectoryService } from '../services/ldapDirectoryService';
 import { findCachedLdapUsersByUsername, upsertCachedLdapUser } from '../services/ldapUserCacheService';
@@ -26,10 +28,15 @@ const memberBody = z.object({
     entered_at: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/).optional(),
 });
 
-type SessionWithMembers = AttendanceSession & { members: AttendanceMember[] };
+type ListMember = Pick<AttendanceMember, 'id' | 'login' | 'name' | 'album' | 'firstAt' | 'lastAt' | 'count' | 'manual'>;
+type SessionWithMembers = Pick<AttendanceSession,
+    'lessonId' | 'lessonStart' | 'lessonEnd' | 'title' | 'lessonGroup' | 'roomLabel' | 'ownerLogin' | 'ownerName' | 'readerId' |
+    'exitReaderId' | 'roomKey' | 'openedAt' | 'closesAt' | 'sentAt'> & {
+    id: number | null; members: ListMember[]; simulated?: true;
+};
 const directory = new LdapDirectoryService();
 const nextProfileLookup = new Map<string, number>();
-const profileLogin = (member: AttendanceMember) => /^\d+$/.test(member.login) ? 's' + member.login : member.login;
+const profileLogin = (member: ListMember) => /^\d+$/.test(member.login) ? 's' + member.login : member.login;
 type MemberProfile = { displayName: string; givenName: string | null; surname: string | null };
 
 async function memberProfiles(members: AttendanceMember[]) {
@@ -55,7 +62,7 @@ async function memberProfiles(members: AttendanceMember[]) {
     return profiles;
 }
 
-const memberView = (member: AttendanceMember, profile?: MemberProfile) => ({
+const memberView = (member: ListMember, profile?: MemberProfile) => ({
     id: member.id,
     userId: member.id,
     studentId: member.login,
@@ -75,17 +82,19 @@ const memberView = (member: AttendanceMember, profile?: MemberProfile) => ({
     scanCount: member.count,
 });
 
-const sessionStatus = (session: AttendanceSession, now = new Date()) =>
+const sessionStatus = (session: Pick<AttendanceSession, 'closesAt' | 'sentAt'>, now = new Date()) =>
     session.sentAt ? 'sent' : session.closesAt && session.closesAt <= now ? 'closed' : 'open';
-const sessionView = (session: SessionWithMembers, profiles?: ReadonlyMap<string, MemberProfile>) => {
-    const now = new Date();
+const sessionView = (session: SessionWithMembers, profiles?: ReadonlyMap<string, MemberProfile>, now = new Date()) => {
     const status = sessionStatus(session, now);
     const closedAt = status === 'open' ? null : session.closesAt?.toISOString() ?? null;
     return {
         status,
+        simulated: session.simulated,
         sessionId: session.id,
         dydaktykId: session.id,
         lessonId: session.lessonId,
+        lessonStart: session.lessonStart.toISOString(),
+        lessonEnd: session.lessonEnd.toISOString(),
         title: session.title,
         group: session.lessonGroup,
         room: session.roomLabel,
@@ -186,6 +195,23 @@ router.get('/list', handle(async (req, res) => {
         include: members,
         take: 2,
     });
+    if (!results.length && env.KANTECH_DEV_TOOLS && req.user!.ldapAuthenticated &&
+        !id && query.teacher && query.lesson_id && query.from) {
+        const preview = getSimulationAttendance(owner(req).ownerLogin, query.lesson_id, query.from, query.teacher);
+        if (preview) {
+            const { lesson, opener, closesAt, members } = preview.session;
+            const entries = [...members.values()].map((member, index) => ({ ...member, id: index + 1, manual: false }));
+            res.json(sessionView({
+                id: null, simulated: true, lessonId: lesson.id, title: lesson.title,
+                lessonStart: new Date(lesson.start), lessonEnd: new Date(lesson.end),
+                lessonGroup: lesson.group ?? null, roomLabel: lesson.room || opener.roomLabel,
+                ownerLogin: opener.login, ownerName: lesson.teacherName || opener.name,
+                readerId: opener.readerId, exitReaderId: opener.exitReaderId ?? null,
+                roomKey: opener.roomKey, openedAt: opener.occurredAt, closesAt, sentAt: null, members: entries,
+            }, await findCachedLdapUsersByUsername(entries.map(profileLogin)), preview.now));
+            return;
+        }
+    }
     if (!results.length) throw new RequestError(404, 'Attendance session not found');
     if (results.length > 1) throw new RequestError(409, 'Specify the occurrence start time');
     res.json(sessionView(results[0], await memberProfiles(results[0].members)));

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { normalizeCardAlias } from './cardAlias';
+import type { listKantechDevices } from './readerGroups';
 
 export const incomingScan = z.object({
     key: z.string().regex(/^[a-f0-9]{64}$/).optional(),
@@ -38,19 +39,56 @@ interface MonitorEvent {
     outcome: string;
 }
 
-export async function getMonitor(database: PrismaClient, readerId?: string, limit = 100) {
+interface MonitorFilters {
+    readerId?: string;
+    deviceId?: string;
+    search?: string;
+    outcome?: string;
+    from?: Date;
+    before?: Date;
+    limit?: number;
+}
+
+export async function getMonitor(
+    database: PrismaClient, devices: Awaited<ReturnType<typeof listKantechDevices>>, filters: MonitorFilters,
+) {
+    const { readerId, deviceId, search, outcome, from, before, limit = 100 } = filters;
+    const deviceReaders = new Map(devices.flatMap((device) => device.readers.map((reader) =>
+        [reader.id, { deviceId: device.id, readerLabel: reader.label, role: reader.role }] as const)));
+    const conditions: Prisma.Sql[] = [];
+    if (readerId) conditions.push(Prisma.sql`"readerId" = ${readerId}`);
+    if (deviceId) {
+        const ids = devices.find(({ id }) => id === deviceId)?.readers.map(({ id }) => id) ?? [];
+        conditions.push(ids.length ? Prisma.sql`"readerId" IN (${Prisma.join(ids)})` : Prisma.sql`FALSE`);
+    }
+    if (outcome) conditions.push(Prisma.sql`outcome = ${outcome}`);
+    if (from) conditions.push(Prisma.sql`COALESCE("occurredAt", "receivedAt") >= ${from}`);
+    if (before) conditions.push(Prisma.sql`COALESCE("occurredAt", "receivedAt") < ${before}`);
+    if (search) {
+        const term = search.toLowerCase();
+        const matchingReaders = [...deviceReaders].filter(([, reader]) =>
+            reader.deviceId.toLowerCase().includes(term) || reader.readerLabel?.toLowerCase().includes(term))
+            .map(([id]) => id);
+        conditions.push(Prisma.sql`(
+            strpos(lower(alias), ${term}) > 0 OR strpos(lower("readerId"), ${term}) > 0
+            ${matchingReaders.length ? Prisma.sql`OR "readerId" IN (${Prisma.join(matchingReaders)})` : Prisma.empty}
+        )`);
+    }
     const [readers, events] = await Promise.all([
-        database.kantechReaderStatus.findMany({ where: { readerId }, orderBy: { readerId: 'asc' } }),
+        database.kantechReaderStatus.findMany({ orderBy: { readerId: 'asc' } }),
         database.$queryRaw<MonitorEvent[]>`
             SELECT id AS key, alias AS label, "readerId", "occurredAt", "receivedAt", outcome
             FROM "KantechReadings"
-            ${readerId === undefined ? Prisma.empty : Prisma.sql`WHERE "readerId" = ${readerId}`}
+            ${conditions.length ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty}
             ORDER BY "receivedAt" DESC, id DESC LIMIT ${limit}
         `,
     ]);
     return {
-        readers: readers.map(({ readerId: id, ...status }) => ({ id, ...status })),
-        events,
+        readers: readers.filter((item) => !readerId || item.readerId === readerId)
+            .map(({ readerId: id, ...status }) => ({ id, ...status, ...deviceReaders.get(id) })),
+        readerIds: readers.map((item) => item.readerId),
+        events: events.map((event) => ({ ...event, ...deviceReaders.get(event.readerId) })),
+        devices,
     };
 }
 

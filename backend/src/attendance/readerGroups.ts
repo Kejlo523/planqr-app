@@ -45,6 +45,15 @@ export async function listReaderGroups() {
     return { groups: groups.map(viewGroup), ...inventory };
 }
 
+export async function listKantechDevices() {
+    const { groups, devices } = await listReaderGroups();
+    const configured = groups.flatMap((group) =>
+        group.devices.map((device) => ({ ...device, groupName: group.name })));
+    const configuredIds = new Set(configured.map(({ id }) => id));
+    return [...configured, ...devices.filter(({ id }) => !configuredIds.has(id))
+        .map(({ id, readers }) => ({ id, readers, groupName: null }))];
+}
+
 export async function saveReaderGroup(input: z.infer<typeof readerGroupInput>) {
     return attendanceDb.$transaction(async (tx) => {
         await lockReaderConfiguration(tx);
@@ -87,17 +96,18 @@ export async function saveReaderGroup(input: z.infer<typeof readerGroupInput>) {
         const existing = await tx.attendanceReader.findMany({
             where: { id: { in: ids } }, include: { entryReader: { select: { id: true } } },
         });
-        if (existing.some(({ exitReaderId, entryReader }) =>
-            [exitReaderId, entryReader?.id].some((partner) => partner && !selected.has(partner)))) {
-            throw new ReaderConfigurationError('Wybierz również urządzenie powiązane z dotychczasową parą czytników.');
-        }
-        await requireIdleReaders(tx, [...ids, ...current?.readers.map(({ id }) => id) ?? []], current?.id);
+        const oldPeers = existing.flatMap(({ exitReaderId, entryReader }) =>
+            [exitReaderId, entryReader?.id].filter((id): id is string => Boolean(id)));
+        await requireIdleReaders(tx, [...ids, ...oldPeers, ...current?.readers.map(({ id }) => id) ?? []], current?.id);
         const group = current
             ? await tx.attendanceReaderGroup.update({ where: { id: current.id }, data: { name: input.name } })
             : await tx.attendanceReaderGroup.create({ data: { name: input.name } });
         await tx.attendanceReader.updateMany({
             where: { groupId: group.id, id: { notIn: ids } },
             data: { groupId: null, deviceId: null, direction: null, singleReader: false },
+        });
+        await tx.attendanceReader.updateMany({
+            where: { exitReaderId: { in: ids } }, data: { exitReaderId: null },
         });
         for (const [id, { label, deviceId, role }] of selected) {
             const data = {

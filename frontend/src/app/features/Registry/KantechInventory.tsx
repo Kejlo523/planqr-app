@@ -10,7 +10,7 @@ type Snapshot = {
   checkedAt: string | null;
 };
 
-export function KantechInventory({ editorOpen }: { editorOpen: boolean }) {
+export function KantechInventory() {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [unavailable, setUnavailable] = useState(false);
   const [now, setNow] = useState(Date.now);
@@ -48,8 +48,7 @@ export function KantechInventory({ editorOpen }: { editorOpen: boolean }) {
   return (
     <aside className="kantech-readers-panel kantech-inventory" aria-labelledby="kantech-inventory-heading">
       <div className="kantech-readers-panel__heading">
-        <h2 id="kantech-inventory-heading" tabIndex={-1}>Czytniki w SmartService</h2>
-        {editorOpen && <a className="kantech-readers__inventory-link" href="#kantech-reader-form">Wróć do formularza</a>}
+        <h2 id="kantech-inventory-heading">Czytniki w SmartService</h2>
       </div>
       {checkedAt && <p className="kantech-inventory__meta">
         Ostatni odczyt <time dateTime={checkedAt}>{checkedAtFormat.format(new Date(checkedAt))}</time>

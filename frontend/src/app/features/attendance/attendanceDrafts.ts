@@ -36,8 +36,11 @@ export interface AttendanceRow {
 export interface AttendanceDraft {
   status: AttendanceDraftStatus;
   sessionId?: number | null;
+  simulated?: boolean;
   lessonId?: string | null;
   title?: string;
+  lessonStart?: string;
+  lessonEnd?: string;
   room?: string;
   group?: string | null;
   exitReaderId?: string | null;
@@ -155,7 +158,10 @@ export const applyAttendanceListToDraft = (
   ...current,
   status: resolveDraftStatus(attendanceList.status),
   sessionId: attendanceList.sessionId,
+  simulated: attendanceList.simulated,
   title: attendanceList.title,
+  lessonStart: attendanceList.lessonStart,
+  lessonEnd: attendanceList.lessonEnd,
   room: attendanceList.room,
   group: attendanceList.group,
   exitReaderId: attendanceList.exitReaderId,

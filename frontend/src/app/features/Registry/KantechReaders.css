@@ -7,7 +7,6 @@
   gap: 1rem;
 }
 
-.kantech-readers-main { display: grid; gap: 1rem; min-width: 0; }
 .kantech-readers-panel {
   --reader-panel-space: clamp(.85rem, 2.5cqi, 1.25rem);
   min-width: 0;
@@ -27,64 +26,14 @@
 }
 
 .kantech-readers-panel__heading h2 { margin: 0; font: 600 1.4rem/1.2 var(--pq-heading); }
-.kantech-readers-view h2[tabindex="-1"] { scroll-margin-top: 5rem; }
-.kantech-readers__inventory-link { display: none; color: var(--admin-accent-text); font-size: .85rem; text-decoration: underline; }
 .kantech-readers__details { color: var(--admin-text-muted); font-size: .85rem; overflow-wrap: anywhere; }
 .kantech-readers__actions { display: flex; gap: .4rem; flex-wrap: wrap; }
-.kantech-readers__notice { padding: .65rem 1rem; background: var(--admin-success-soft); border-radius: var(--admin-radius); }
 
 .kantech-reader-list { list-style: none; margin: 0; padding: 0; }
 .kantech-reader-list__empty { margin: 0; padding: var(--reader-panel-space); color: var(--admin-text-muted); }
 .kantech-reader-row { padding: .85rem var(--reader-panel-space); }
 .kantech-reader-row + .kantech-reader-row { border-top: 1px solid var(--admin-border); }
 .kantech-reader-row__header { display: flex; justify-content: space-between; align-items: center; gap: .65rem 1rem; flex-wrap: wrap; }
-.kantech-reader-row__summary { display: grid; gap: .25rem; min-width: 0; }
-.kantech-reader-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: .15rem .5rem; overflow-wrap: anywhere; }
-.kantech-reader-name .kantech-monitor__mono { font-size: .82rem; color: var(--admin-accent-text); }
-
-.kantech-reader-flow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: stretch;
-  gap: clamp(.35rem, 1.8cqi, .8rem);
-  margin-top: .65rem;
-}
-.kantech-reader-flow__endpoint {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  align-items: start;
-  gap: .3rem;
-  min-width: 0;
-  padding: .6rem .7rem;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--admin-radius);
-  background: var(--pq-nav);
-}
-.kantech-reader-flow__direction { color: var(--admin-text-muted); font-weight: 600; font-size: .78rem; }
-.kantech-reader-flow__endpoint button { justify-self: start; }
-.kantech-reader-flow__arrow { align-self: center; color: var(--admin-accent-text); font-size: 1.1rem; }
-
-.kantech-readers-form { padding: var(--reader-panel-space); gap: .85rem; }
-.kantech-readers-form p { margin: 0; }
-.kantech-readers__room,
-.kantech-readers__endpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
-.kantech-readers__endpoints[data-single="true"] { grid-template-columns: minmax(0, 1fr); }
-.kantech-readers__endpoints[data-single="true"] .kantech-readers__endpoint { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.kantech-readers__endpoint {
-  display: grid;
-  gap: .65rem;
-  min-width: 0;
-  margin: 0;
-  padding: .65rem .85rem .85rem;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--admin-radius);
-  background: var(--pq-nav);
-}
-.kantech-readers__endpoint legend { padding-inline: .25rem; color: var(--admin-accent-text); font-weight: 600; }
-.kantech-readers-form label { min-width: 0; font-size: .88rem; }
-.kantech-readers-form input[readonly] { color: var(--admin-text-muted); }
-.kantech-readers-form__footer { justify-content: flex-end; padding-top: .7rem; border-top: 1px solid var(--admin-border); }
-
 .kantech-rcp-help { margin: .75rem var(--reader-panel-space); }
 .kantech-rcp-form {
   display: grid;
@@ -159,13 +108,8 @@
 
 @container kantech-readers (max-width: 45rem) {
   .kantech-readers-layout { grid-template-columns: minmax(0, 1fr); }
-  .kantech-readers__inventory-link { display: inline; }
 }
 
 @container kantech-readers (max-width: 31rem) {
   .kantech-rcp-reader { grid-template-columns: minmax(0, 1fr); gap: .3rem; }
-  .kantech-readers__endpoints,
-  .kantech-readers__endpoints[data-single="true"] .kantech-readers__endpoint { grid-template-columns: minmax(0, 1fr); }
-  .kantech-reader-row__header .admin-button,
-  .kantech-reader-flow__endpoint .admin-button { min-height: 2.5rem; }
 }

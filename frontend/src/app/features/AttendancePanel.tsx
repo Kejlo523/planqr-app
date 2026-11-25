@@ -112,7 +112,7 @@ export default function AttendancePanel() {
 
   const addCurrentSessionUser = async (albumNumber: string, enteredAt: string | null) => {
     if (!draft.sessionId) {
-      return;
+      return false;
     }
 
     setIsLoading(true);
@@ -125,9 +125,11 @@ export default function AttendancePanel() {
         enteredAt,
       });
       await loadAttendance(draft.sessionId);
+      return true;
     } catch (addError) {
       console.error("Error adding attendance user:", addError);
       setError("Nie udało się dodać wpisu do sesji obecności.");
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -173,7 +175,7 @@ export default function AttendancePanel() {
           onCloseList={() => void closeCurrentSession()}
           onSendList={() => void sendCurrentSession()}
           onRefresh={() => void loadAttendance(draft.sessionId)}
-          onAddRow={(albumNumber, enteredAt) => void addCurrentSessionUser(albumNumber, enteredAt)}
+          onAddRow={addCurrentSessionUser}
           onRemoveRow={(rowId, userId) => void removeCurrentSessionUser(rowId, userId)}
         />
       </main>

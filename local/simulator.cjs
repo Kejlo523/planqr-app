@@ -13,10 +13,10 @@ const doors = new Map([
     ['49888', { name: 'Czytnik zapasowy', status: 'Device Offline' }],
     ['49889', { name: 'Czytnik wyłączony', status: 'Reader disabled' }],
     ['49890', { name: 'Czytnik bez stanu', status: 'Door closed' }],
-    ['49701', { name: '(01.04.1) RCP04-WI', status: 'Device Online' }],
-    ['49702', { name: '(01.04.2) RCP04-WI - Exit', status: 'Device Online' }],
-    ['49703', { name: '(01.05.1) RCP05-WI', status: 'Device Online' }],
-    ['49704', { name: '(01.05.2) RCP05-WI - Exit', status: 'Device Online' }],
+    ['49701', { name: '(01.04.1) RCP04-WI (symulator)', status: 'Device Online' }],
+    ['49702', { name: '(01.04.2) RCP04-WI (symulator) - Exit', status: 'Device Online' }],
+    ['49703', { name: '(01.05.1) RCP05-WI (symulator)', status: 'Device Online' }],
+    ['49704', { name: '(01.05.2) RCP05-WI (symulator) - Exit', status: 'Device Online' }],
 ]);
 let scheduleAvailable = true;
 let readerAvailable = true;
@@ -48,7 +48,7 @@ const routes = async (request, response) => {
     if (request.method === 'POST') {
         const value = await json(request);
         if (url.pathname === '/test/scans') {
-            const reader = String(value.readerId ?? '49919');
+            const reader = String(value.readerId ?? '49701');
             const at = value.at === undefined ? new Date() : new Date(value.at);
             const alias = String(value.alias ?? '').trim();
             const cardAlias = /^WI[_-]*SYNC[_-]*(\d{1,8})$/i.exec(alias);

@@ -30,13 +30,33 @@
 .kantech-monitor__feed { border: 1px solid var(--admin-border); border-radius: var(--admin-radius); background: var(--admin-surface); }
 .kantech-monitor__feed-header { padding: .9rem 1rem; background: var(--admin-surface-muted); }
 .kantech-monitor__feed-header h2 { margin: 0; font-size: 1.125rem; }
-.kantech-monitor__feed-header label { display: flex; align-items: center; gap: .6rem; }
-.kantech-monitor__feed-header select { color: inherit; background: var(--admin-bg); border: 1px solid var(--admin-accent-border); padding: .35rem; }
+.kantech-monitor__feed-header > span { color: var(--admin-text-muted); font-size: .875rem; }
+.kantech-monitor__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  align-items: end;
+  gap: .75rem;
+  padding: .85rem 1rem;
+}
+.kantech-monitor__filters label { display: grid; gap: .3rem; min-width: 0; font-size: .875rem; }
+.kantech-monitor__filters input, .kantech-monitor__filters select {
+  min-width: 0;
+  width: 100%;
+  min-height: 2.4rem;
+  padding: .4rem .55rem;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius);
+  background: var(--admin-bg);
+  color: inherit;
+  font: inherit;
+}
+.kantech-monitor__filters button { justify-self: start; }
 .kantech-monitor__scroll { overflow-x: auto; }
 .kantech-monitor table { width: 100%; border-collapse: collapse; text-align: left; }
 .kantech-monitor th, .kantech-monitor td { padding: .7rem 1rem; border-top: 1px solid var(--admin-accent-border); white-space: nowrap; }
 .kantech-monitor td:first-child { color: var(--admin-accent-text); }
 .kantech-monitor td[data-label="Karta"] { max-width: 18rem; white-space: normal; overflow-wrap: anywhere; }
+.kantech-monitor td small { display: block; font: .8rem/1.4 system-ui, sans-serif; color: var(--admin-text-muted); }
 .kantech-monitor__empty { padding: 1rem; margin: 0; }
 .kantech-monitor__error { padding: .75rem 1rem; background: var(--admin-danger-soft); }
 .kantech-monitor :focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 2px; }
@@ -61,5 +81,4 @@
     font-weight: 600;
     line-height: 1.45;
   }
-  .kantech-monitor td:last-child { grid-column: 1 / -1; }
 }

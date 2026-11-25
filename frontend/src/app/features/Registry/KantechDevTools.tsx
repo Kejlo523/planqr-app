@@ -1,15 +1,18 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { findZutTeachers, type ZutTeacher } from "../../services/zutScheduleService";
-import { kantechTime, outcomeLabel } from "./kantechPresentation";
+import { kantechTime, outcomeLabel, rcpDeviceName, rcpReaderRoles, type KantechDevice } from "./kantechPresentation";
 import { KantechNavigation } from "./KantechNavigation";
 import "./KantechDevTools.css";
 
 type Card = { alias: string; login: string; name: string; album: string | null; scheduleId: string | null };
 type Source = "demo" | "live";
-type SimulatedScan = { id: string; alias: string; label: string; readerId: string; occurredAt: string; outcome: string; source: Source };
+type SimulatedScan = {
+  id: string; alias: string; label: string; readerId: string; deviceId?: string;
+  occurredAt: string; outcome: string; source: Source; lesson?: { title: string };
+};
 type Snapshot = {
   cards: Card[];
-  readers: { id: string; label: string }[];
+  devices: KantechDevice[];
   observed: { alias: string; canonicalAlias: string; readerId: string; receivedAt: string }[];
   simulated: SimulatedScan[];
 };
@@ -61,13 +64,16 @@ export default function KantechDevTools() {
   const [teacherNotice, setTeacherNotice] = useState("");
   const [teacherBusy, setTeacherBusy] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selectedReader, setReader] = useState<string>();
-  const reader = selectedReader ?? snapshot?.readers[0]?.id ?? "";
+  const [selection, setSelection] = useState<{ deviceId: string; readerId?: string }>();
   const [scanAlias, setScanAlias] = useState("WISYNC_1");
-  const [source, setSource] = useState<Source>("demo");
+  const [source, setSource] = useState<Source>("live");
   const [granted, setGranted] = useState(true);
   const [sending, setSending] = useState(false);
   const [scanNotice, setScanNotice] = useState("");
+  const devices = snapshot?.devices ?? [];
+  const device = selection ? devices.find(({ id }) => id === selection.deviceId) : devices[0];
+  const reader = selection?.readerId ? device?.readers.find(({ id }) => id === selection.readerId)
+    : device?.readers.find(({ role }) => role !== "EXIT") ?? device?.readers[0];
 
   useEffect(() => {
     const controller = new AbortController();
@@ -136,7 +142,8 @@ export default function KantechDevTools() {
     finally { setSaving(false); }
   };
   const updateSimulation = async (value?: string, origin: Source = source) => {
-    if (value !== undefined && (!value.trim() || !reader.trim())) return;
+    const target = device && reader ? { deviceId: device.id, readerId: reader.id } : null;
+    if (value !== undefined && (!value.trim() || !target)) return;
     setSending(true); setScanNotice("");
     try {
       let simulated: SimulatedScan[] = [];
@@ -144,7 +151,7 @@ export default function KantechDevTools() {
         const response = await fetch(api + "/scans", { method: "DELETE", credentials: "include" });
         if (!response.ok) throw new Error("Nie udało się wyczyścić testu.");
       } else {
-        simulated = await request("/scans", { alias: value, readerId: reader, source: origin, granted });
+        simulated = await request("/scans", { alias: value, ...target, source: origin, granted });
       }
       setSnapshot((current) => current && { ...current, simulated });
     } catch (error) { setScanNotice((error as Error).message); }
@@ -173,7 +180,9 @@ export default function KantechDevTools() {
                       setAssignment({ ...initialAssignment, alias: item.alias });
                       setTeacher(undefined); setPlan(undefined); setMatches([]); setMappingNotice(""); setTeacherNotice("");
                     }
-                    setScanAlias(item.alias); setReader(item.readerId);
+                    setScanAlias(item.alias);
+                    const observedDevice = devices.find(({ readers }) => readers.some(({ id }) => id === item.readerId));
+                    if (observedDevice) setSelection({ deviceId: observedDevice.id, readerId: item.readerId });
                   }}>{item.alias}</button>
               )) : <p>Po odbiciu karty jej alias pojawi się tutaj.</p>}
             </div>
@@ -228,21 +237,36 @@ export default function KantechDevTools() {
           </section>
           <section className="kantech-dev__section" aria-labelledby="karte-simulation">
             <h2 id="karte-simulation">Symulacja odbić</h2>
-            <p>Symulacja nie zapisuje obecności.</p>
+            <p>Listę z symulacji Planu ZUT zobaczysz w podglądzie tych zajęć.</p>
             <form className="kantech-dev__form" onSubmit={(event) => { event.preventDefault(); void updateSimulation(scanAlias); }}>
-              <label>Czytnik<input value={reader} onChange={(event) => setReader(event.target.value)} list="kantech-dev-readers" required maxLength={64} /></label>
-              <datalist id="kantech-dev-readers">{snapshot.readers.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</datalist>
-              <label>Alias do symulacji<input value={scanAlias} onChange={(event) => setScanAlias(event.target.value)} required maxLength={128} /></label>
               <label>Źródło zajęć<select value={source} onChange={(event) => setSource(event.target.value as Source)}>
                 <option value="demo">Przykładowe zajęcia</option><option value="live">Plan ZUT</option>
               </select></label>
+              <label><span id="kantech-test-device">Urządzenie RCP</span>
+                <select aria-labelledby="kantech-test-device" value={device?.id ?? ""} required disabled={sending || !devices.length}
+                onChange={(event) => setSelection({ deviceId: event.target.value })}>
+                {!device && <option value="">Wybierz urządzenie</option>}
+                {devices.map((item) => <option key={item.id} value={item.id}>
+                  {rcpDeviceName(item.id)}{item.groupName && " · " + item.groupName}
+                </option>)}
+              </select></label>
+              <label><span id="kantech-test-reader">Czytnik</span>
+                <select aria-labelledby="kantech-test-reader" value={reader?.id ?? ""} required disabled={sending || !device}
+                onChange={(event) => device && setSelection({ deviceId: device.id, readerId: event.target.value })}>
+                {!reader && <option value="">Wybierz czytnik</option>}
+                {device?.readers.map((item) => <option key={item.id} value={item.id}>
+                  {rcpReaderRoles[item.role]} · {item.id}
+                </option>)}
+              </select></label>
+              {!devices.length && <p>Brak urządzeń RCP w spisie SmartService.</p>}
+              <label>Alias do symulacji<input value={scanAlias} onChange={(event) => setScanAlias(event.target.value)} required maxLength={128} /></label>
               <label className="kantech-dev__check"><input type="checkbox" checked={granted} onChange={(event) => setGranted(event.target.checked)} /> Odczyt przyjęty</label>
-              <button type="submit" className="admin-button admin-button--primary" disabled={sending}>Wywołaj odbicie</button>
+              <button type="submit" className="admin-button admin-button--primary" disabled={sending || !reader}>Wywołaj odbicie</button>
             </form>
             <div className="kantech-dev__recent">
               <h3>Gotowe odbicia dla przykładowych zajęć</h3>
               {presets.map((preset) => <button key={preset.alias} type="button" className="admin-button admin-button--ghost admin-button--small"
-                disabled={sending} onClick={() => void updateSimulation(preset.alias, "demo")}>{preset.alias} · {preset.label}</button>)}
+                disabled={sending || !reader} onClick={() => void updateSimulation(preset.alias, "demo")}>{preset.alias} · {preset.label}</button>)}
             </div>
             <div className="kantech-dev__row"><h3>Wynik symulacji</h3>
               <button type="button" className="admin-button admin-button--ghost admin-button--small" disabled={sending || !snapshot.simulated.length}
@@ -250,8 +274,9 @@ export default function KantechDevTools() {
             {scanNotice && <p role="alert">{scanNotice}</p>}
             {snapshot.simulated.length ? <ol className="kantech-dev__items" aria-label="Wynik symulacji">{snapshot.simulated.map((scan) => (
               <li key={scan.id}><strong>{outcomeLabel[scan.outcome] ?? "Odczytano"} · {scan.label}</strong>
-                <span>{scan.alias} · {scan.readerId} · {kantechTime.format(new Date(scan.occurredAt))}
-                  {" · "}{scan.source === "demo" ? "Przykładowe zajęcia" : "Plan ZUT"}</span></li>
+                <span>{scan.alias} · {scan.deviceId && rcpDeviceName(scan.deviceId) + " · "}{scan.readerId} · {kantechTime.format(new Date(scan.occurredAt))}
+                  {" · "}{scan.source === "demo" ? "Przykładowe zajęcia" : "Plan ZUT"}
+                  {scan.lesson && " · " + scan.lesson.title}</span></li>
             ))}</ol> : <p>Wywołaj odbicie, aby zobaczyć wynik.</p>}
           </section>
         </div>}

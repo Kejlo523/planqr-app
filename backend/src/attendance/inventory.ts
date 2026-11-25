@@ -12,6 +12,7 @@ export const inventoryReaders = z.array(inventoryDoor.extend({
 
 export type InventoryDoor = z.infer<typeof inventoryDoor>;
 export type InventoryReaders = z.infer<typeof inventoryReaders>;
+export type ReaderRole = 'ENTRY' | 'EXIT' | 'BOTH';
 
 export function groupInventoryByDevice(input: unknown) {
     const snapshot = inventoryReaders.safeParse(input);
@@ -27,7 +28,14 @@ export function groupInventoryByDevice(input: unknown) {
         if (!device.readers.some(({ id }) => id === reader.id)) device.readers.push(reader);
         devices.set(id, device);
     }
-    return [...devices.values()].sort((a, b) => a.id.localeCompare(b.id));
+    return [...devices.values()].sort((a, b) => a.id.localeCompare(b.id)).map((device) => ({
+        ...device,
+        readers: device.readers.map((reader) => {
+            const role: ReaderRole = /\b(?:exit|wyjście)\s*$/iu.test(reader.label ?? '') ? 'EXIT'
+                : device.readers.length === 1 ? 'BOTH' : 'ENTRY';
+            return { ...reader, role };
+        }),
+    }));
 }
 
 export async function saveInventory(database: PrismaClient, readers: InventoryReaders) {

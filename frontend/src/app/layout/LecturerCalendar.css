@@ -30,7 +30,7 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console[data-workspace-mode="drawer"],
-.lecturer-console[data-workspace-mode="fullscreen-drawer"] {
+.lecturer-console[data-workspace-mode="sheet"] {
   --lecturer-panel-width: clamp(21rem, 36vw, 25rem);
   --lecturer-attendance-width: clamp(21rem, 38vw, 24rem);
 }
@@ -62,8 +62,7 @@ body.lecturer-console-scroll-root {
 
 .lecturer-console__calendar-shell,
 .lecturer-console__panel-shell,
-.lecturer-console__drawer,
-.lecturer-console__floating-panel {
+.lecturer-console__drawer {
   border: 1px solid var(--admin-border);
   border-radius: calc(var(--admin-radius) + 4px);
   background: var(--admin-surface);
@@ -96,7 +95,7 @@ body.lecturer-console-scroll-root {
 
 .lecturer-console__surface-title h1 {
   margin: 0;
-  font: 600 clamp(1.6rem, 3vw, 2.35rem)/1.1 var(--pq-heading);
+  font: 600 clamp(1.55rem, 2.5vw, 1.95rem)/1.1 var(--pq-heading);
   color: var(--admin-text);
 }
 
@@ -159,8 +158,9 @@ body.lecturer-console-scroll-root {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: .45rem;
-  width: min(100%, 36rem);
+  width: min(100%, 31rem);
 }
+.lecturer-console__teacher-search[hidden] { display: none; }
 
 .lecturer-console__calendar-toolbar {
   display: grid;
@@ -177,6 +177,7 @@ body.lecturer-console-scroll-root {
   color: var(--admin-text);
   font: 600 1.25rem/1.2 var(--pq-heading);
   text-align: center;
+  margin: 0;
 }
 
 .lecturer-console__search-icon {
@@ -424,9 +425,13 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console__panel-shell {
+  align-self: flex-start;
+  display: flex;
+  flex: none;
   width: 0;
   min-width: 0;
   min-height: 0;
+  max-height: 100%;
   overflow: hidden;
   opacity: 0;
   transform: translateX(10px);
@@ -450,18 +455,20 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console__panel {
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   min-width: 0;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
 }
 
 .lecturer-console__panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-  padding: 0.95rem 1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  flex: none;
+  gap: .6rem;
+  padding: .75rem .9rem;
   border-bottom: 1px solid var(--admin-border);
 }
 
@@ -471,9 +478,9 @@ body.lecturer-console-scroll-root {
 
 .lecturer-console__panel-header h2 {
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.2;
+  font: 600 1.35rem/1.12 var(--pq-heading);
   color: var(--admin-text);
+  overflow-wrap: anywhere;
 }
 
 .lecturer-console__panel-header p {
@@ -499,9 +506,9 @@ body.lecturer-console-scroll-root {
 .lecturer-console__panel-state {
   display: inline-flex;
   align-items: center;
-  min-height: 1.9rem;
-  padding: 0.2rem 0.7rem;
-  border-radius: 999px;
+  margin-top: .35rem;
+  padding: .16rem .48rem;
+  border-radius: .35rem;
   font-size: 0.76rem;
   font-weight: 700;
   border: 1px solid transparent;
@@ -530,17 +537,23 @@ body.lecturer-console-scroll-root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  flex-wrap: wrap;
+  gap: .55rem;
+  padding: .7rem .9rem;
 }
+
+.lecturer-console__panel-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 .lecturer-console__panel-strip {
   border-bottom: 1px solid var(--admin-border);
 }
 
 .lecturer-console__panel-footer {
+  flex: none;
+  justify-content: flex-end;
   border-top: 1px solid var(--admin-border);
 }
+.lecturer-console__panel-footer .lecturer-console__muted-copy { margin-inline-end: auto; }
 
 .lecturer-console__room-inline,
 .lecturer-console__muted-copy {
@@ -557,9 +570,12 @@ body.lecturer-console-scroll-root {
   align-items: center;
   gap: 0.55rem;
 }
+.lecturer-console__row-actions,
+.lecturer-console__message-actions { flex-wrap: wrap; }
 
 .lecturer-console__room-editor {
   width: 100%;
+  flex-wrap: wrap;
 }
 
 .lecturer-console__inline-input,
@@ -577,7 +593,7 @@ body.lecturer-console-scroll-root {
 
 .lecturer-console__message-editor,
 .lecturer-console__composer-input {
-  min-height: 88px;
+  min-height: 3.25rem;
   resize: vertical;
 }
 
@@ -590,21 +606,11 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console__panel-section {
-  min-height: 0;
-  padding: 0 1rem;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-
-.lecturer-console__messages {
-  min-height: 0;
-  overflow: auto;
+  padding: 0 .9rem;
 }
 
 .lecturer-console__messages-empty {
-  min-height: 7rem;
-  display: grid;
-  place-items: center;
+  padding-block: .7rem;
   color: var(--admin-text-muted);
   font-size: 0.84rem;
 }
@@ -681,13 +687,14 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console__composer {
-  padding: 0.85rem 0 0.95rem;
+  padding: .6rem 0 .7rem;
   border-top: 1px solid var(--admin-border);
 }
 
 .lecturer-console__composer .admin-button {
   flex-shrink: 0;
 }
+.lecturer-console__composer textarea { min-width: 0; }
 
 .lecturer-console__loading {
   flex: 1;
@@ -696,53 +703,56 @@ body.lecturer-console-scroll-root {
   color: var(--admin-text-muted);
 }
 
-.lecturer-console__backdrop {
+.lecturer-console__overlay {
   position: fixed;
-  top: var(--admin-appbar-height);
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 55;
-  border: 0;
+  inset: calc(var(--admin-appbar-height) + .65rem) .75rem auto auto;
+  width: max-content;
+  max-width: calc(100% - 1.5rem);
+  max-height: calc(100dvh - var(--admin-appbar-height) - 1.4rem);
+  margin: 0;
   padding: 0;
-  background: var(--admin-overlay);
+  border: 0;
+  background: transparent;
+  color: var(--admin-text);
 }
+.lecturer-console__overlay[open] {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+}
+.lecturer-console__overlay::backdrop { background: rgb(8 15 27 / .32); }
 
-.lecturer-console__drawer,
-.lecturer-console__floating-panel {
-  position: fixed;
-  top: calc(var(--admin-appbar-height) + 0.65rem);
-  bottom: 0.75rem;
-  z-index: 60;
+.lecturer-console__drawer {
+  display: flex;
+  min-width: 0;
+  max-height: calc(100dvh - var(--admin-appbar-height) - 1.5rem);
   overflow: hidden;
+  box-shadow: var(--admin-shadow);
 }
+.lecturer-console__drawer--details { width: var(--lecturer-panel-width); }
+.lecturer-console__drawer--attendance { width: var(--lecturer-attendance-width); }
 
-.lecturer-console__drawer--details,
-.lecturer-console__floating-panel {
-  right: 0.75rem;
-  width: var(--lecturer-panel-width);
+.lecturer-console__overlay[data-placement="bottom"] {
+  inset: auto 0 0;
+  width: min(100%, 42rem);
+  max-width: 100%;
+  max-height: min(75dvh, calc(100dvh - 3rem));
+  margin-inline: auto;
 }
-
-.lecturer-console__drawer--details-stacked {
-  right: calc(var(--lecturer-attendance-width) + 1.5rem);
+.lecturer-console__overlay[data-placement="bottom"] .lecturer-console__drawer {
+  width: 100%;
+  max-height: min(74dvh, calc(100dvh - 3rem));
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  border-radius: 1rem 1rem 0 0;
 }
-
-.lecturer-console__drawer--attendance,
-.lecturer-console__floating-panel {
-  width: var(--lecturer-attendance-width);
-  z-index: 61;
-}
-
-.lecturer-console__drawer--attendance {
-  right: 0.75rem;
-}
-
-.lecturer-console__drawer--fullscreen {
-  top: calc(var(--admin-appbar-height) + 0.5rem);
-  right: 0.5rem;
-  left: 0.5rem;
-  bottom: 0.5rem;
-  width: auto;
+@media (prefers-reduced-motion: no-preference) {
+  .lecturer-console__overlay[data-placement="bottom"][open] {
+    animation: lecturer-panel-in 220ms cubic-bezier(.22, 1, .36, 1) both;
+  }
+  @keyframes lecturer-panel-in {
+    from { transform: translateY(1.75rem); }
+    to { transform: translateY(0); }
+  }
 }
 
 .lecturer-console__toast-stack {
@@ -763,36 +773,15 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console[data-workspace-mode="drawer"] .lecturer-console__shell,
-.lecturer-console[data-workspace-mode="fullscreen-drawer"] .lecturer-console__shell,
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__shell,
 .lecturer-console[data-workspace-mode="drawer"] .lecturer-console__workspace,
-.lecturer-console[data-workspace-mode="fullscreen-drawer"] .lecturer-console__workspace {
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__workspace {
   overflow: visible;
 }
 
 .lecturer-console[data-workspace-mode="drawer"] .lecturer-console__calendar-shell,
-.lecturer-console[data-workspace-mode="fullscreen-drawer"] .lecturer-console__calendar-shell {
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-shell {
   min-height: calc(100dvh - var(--admin-appbar-height) - 1.5rem);
-}
-
-@media (max-width: 1280px) {
-  .lecturer-console__preview-autocomplete {
-    width: min(100%, 18rem);
-  }
-
-  .lecturer-console__panel-header,
-  .lecturer-console__panel-strip,
-  .lecturer-console__panel-footer,
-  .lecturer-console__room-editor,
-  .lecturer-console__row-actions,
-  .lecturer-console__composer,
-  .lecturer-console__message-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .lecturer-console__panel-header-actions {
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 720px) {
@@ -808,21 +797,7 @@ body.lecturer-console-scroll-root {
     padding-inline: 0.75rem;
   }
 
-  .lecturer-console__preview-autocomplete {
-    width: 100%;
-  }
-
-  .lecturer-console__calendar-nav,
-  .lecturer-console__view-toggle {
-    flex-wrap: wrap;
-  }
-
-  .lecturer-console__drawer--details-stacked,
-  .lecturer-console__drawer--details,
-  .lecturer-console__drawer--attendance,
-  .lecturer-console__floating-panel {
-    right: 0.5rem;
-  }
+  .lecturer-console__panel-footer .admin-button { min-height: 2.65rem; }
 }
 
 .lecturer-console__teacher-search .lecturer-console__preview-autocomplete {
@@ -848,28 +823,91 @@ body.lecturer-console-scroll-root {
   .lecturer-console__teacher-search { justify-content: flex-start; }
 }
 
-@media (max-width: 600px) {
-  .lecturer-console__calendar-frame:has(.fc-timeGridWeek-view) {
-    overflow-x: auto;
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__surface-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .5rem;
+  padding: .5rem .7rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__surface-title h1 {
+  font-size: 1.33rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__surface-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__teacher-search {
+  grid-column: 1 / -1;
+  flex-wrap: nowrap;
+  gap: .35rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__preview-autocomplete {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__teacher-search .admin-button {
+  padding-inline: .55rem;
+  white-space: nowrap;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-toolbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .35rem;
+  padding: .25rem .45rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-nav,
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__surface-actions { gap: .2rem; }
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-nav .admin-icon-button,
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__surface-actions .admin-icon-button,
+.lecturer-console__search-toggle {
+  flex: none;
+  width: 2.4rem;
+  min-height: 2.4rem;
+}
+.lecturer-console__compact-date {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.4rem;
+  padding: .15rem .1rem;
+  border: 0;
+  border-radius: var(--admin-radius);
+  background: transparent;
+  color: var(--admin-text);
+  font: 600 .85rem/1.2 var(--font-base);
+  cursor: pointer;
+}
+.lecturer-console__compact-view {
+  min-height: 2.4rem;
+  max-width: 5.2rem;
+  padding: .2rem .25rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font: 500 .82rem/1.15 var(--font-base);
+}
+.lecturer-console__compact-date:focus-visible,
+.lecturer-console__compact-view:focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 1px; }
+.lecturer-console[data-workspace-mode="sheet"] .fc-timeGridDay-view .lecturer-console__day-heading {
+  display: flex;
+  align-items: baseline;
+  gap: .35rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .fc-timeGridDay-view .lecturer-console__day-heading strong {
+  font-size: 1rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .fc-timeGridDay-view .fc-col-header-cell-cushion {
+  padding-block: .33rem;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-frame:has(.fc-timeGridWeek-view) {
+  overflow-x: auto;
+}
+.lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-frame .fc:has(.fc-timeGridWeek-view) {
+  min-width: 42rem;
+}
+@media (max-width: 720px) {
+  .lecturer-console[data-workspace-mode="sheet"] .lecturer-console__calendar-shell {
+    min-height: calc(100dvh - var(--admin-appbar-height) - 1rem);
   }
-  .lecturer-console__calendar-frame .fc:has(.fc-timeGridWeek-view) {
-    min-width: 47rem;
-  }
-  .lecturer-console__calendar-toolbar {
-    grid-template-columns: 1fr auto;
-    gap: .45rem;
-    padding: .45rem .65rem;
-  }
-  .lecturer-console__calendar-date {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    justify-self: start;
-    text-align: left;
-    font-size: 1.12rem;
-  }
-  .lecturer-console__calendar-nav { gap: .2rem; }
-  .lecturer-console__calendar-nav .admin-icon-button,
-  .lecturer-console__calendar-toolbar > div > .admin-icon-button { width: 1.7rem; min-height: 1.75rem; padding: .2rem; }
-  .lecturer-console__surface-actions { gap: .25rem; }
-  .lecturer-console__view-button { min-height: 1.9rem; padding: .25rem .35rem; font-size: .74rem; }
+  .lecturer-console__composer-input { font-size: 1rem; }
 }

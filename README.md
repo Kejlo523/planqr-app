@@ -18,10 +18,10 @@ Skrypt tworzy lokalne sekrety, certyfikat HTTPS, bazę z migracjami i symulatory
 
 Podgląd dydaktyka pobiera prawdziwy plan z `plan.zut.edu.pl`. Karty i zajęcia przypisane do kont testowych korzystają z lokalnego symulatora, ustawionego przez `ZUT_ATTENDANCE_SCHEDULE_URL`.
 
-Do zasymulowania odbicia użyj lokalnego symulatora:
+W zakładce **Czytniki** wybierz **Dodaj grupę**, dodaj symulowane urządzenie RCP-04 i zapisz konfigurację. Symulator przypisuje mu czytniki `49701` i `49702`. Do zasymulowania odbicia użyj:
 
 ```powershell
-function Test-Tap($Number, $Reader = '49919') {
+function Test-Tap($Number, $Reader = '49701') {
     $body = @{ alias = "WISYNC_$Number"; readerId = $Reader } | ConvertTo-Json -Compress
     Invoke-RestMethod 'http://127.0.0.1:18700/test/scans' -Method Post -ContentType 'application/json' -Body $body
 }
@@ -29,10 +29,10 @@ Test-Tap 1
 Test-Tap 2
 Test-Tap 3
 Start-Sleep -Seconds 3
-Test-Tap 1 '49921'
+Test-Tap 1 '49702'
 ```
 
-Karta `1` należy do prowadzącego, `2` do studenta, `3` do gościa. Domyślne testowe zajęcia mają ID `9001` i zaczynają się pięć minut po starcie symulatora. Pod `/attendance/9001` lista odświeża się automatycznie, a XLSX jest dostępny od otwarcia. Symulator ma pary `49919 → 49921` i `49920 → 49922` dla dwóch sal.
+Karta `1` należy do prowadzącego, `2` do studenta, `3` do gościa. Domyślne testowe zajęcia mają ID `9001` i zaczynają się pięć minut po starcie symulatora. Pod `/attendance/9001` lista odświeża się automatycznie, a XLSX jest dostępny od otwarcia.
 
 ## API Kantech
 
@@ -40,7 +40,7 @@ Obie metody pod `/api/kantech/events` wymagają zalogowania przez LDAP i roli ad
 
 | Metoda | Wejście | Odpowiedź |
 | --- | --- | --- |
-| `GET /api/kantech/events` | Opcjonalne `readerId` i `limit` od 1 do 100 | JSON z trybem, stanem czytników i zdarzeniami |
+| `GET /api/kantech/events` | Opcjonalne `deviceId`, `readerId`, `search`, `outcome`, `from`, `to` i `limit` od 1 do 100. Daty w formacie `YYYY-MM-DD` obejmują całe dni w strefie Europe/Warsaw. | JSON z trybem, urządzeniami RCP, stanem czytników i zdarzeniami |
 | `POST /api/kantech/events` | Odbicie albo paczka z `readerId`, `state` i `events` | `204` po przyjęciu, `400` dla błędnych danych, `401` lub `403` przy braku uprawnień |
 
 Przykładowe pojedyncze odbicie testowe:
@@ -60,11 +60,11 @@ W zakładce **Odczyty na żywo** administrator LDAP może zmienić tryb przez pr
 
 W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>` i odświeża listę przez `GET /internal/kantech/readers`.
 
-Administrator LDAP w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers` tworzy grupę i wybiera urządzenia ze spisu SmartService. PlanQR pobiera identyfikatory czytników według oznaczenia RCP i adresu urządzenia w etykietach `Doors`. Każdy czytnik w grupie ma rolę wejścia, wyjścia albo obu kierunków. Dotychczasowe konfiguracje par i pojedynczych czytników działają do czasu przeniesienia ich do grupy.
+Administrator LDAP w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers` tworzy grupę i wybiera urządzenia ze spisu SmartService. PlanQR pobiera identyfikatory czytników według oznaczenia RCP i adresu urządzenia w etykietach `Doors`. Każdy czytnik w grupie ma rolę wejścia, wyjścia albo obu kierunków. Tylko czytniki przypisane przez urządzenie do grupy mogą otwierać nowe listy obecności. Listy otwarte w dawnej konfiguracji można dokończyć w dotychczasowy sposób.
 
 `GET /api/kantech/readers/groups` zwraca zapisane grupy i urządzenia wykryte w SmartService. `POST /api/kantech/readers/groups` zapisuje `name`, listę `devices` z ich `id` oraz `readers: [{ id, role }]`. Role to `ENTRY`, `EXIT` i `BOTH`. Opcjonalne `id` wskazuje edytowaną grupę. `DELETE /api/kantech/readers/groups/:id` usuwa grupę.
 
-`GET /api/kantech/readers` zwraca listę. `POST /api/kantech/readers/setup` przyjmuje `entry` i `exit` w formacie `{ id, label }`, `buildingId`, `roomNumber` oraz opcjonalne `edit`. Wartość `exit: null` jawnie wybiera tryb jednego czytnika. Dotychczasowy `POST /api/kantech/readers` nadal obsługuje pojedyncze rekordy. `DELETE /api/kantech/readers/:id` usuwa czytnik. W trybie `attendance` prowadzący otwiera listę na wejściu, a uczestnik jest zapisywany najwyżej raz.
+`GET /api/kantech/readers` zwraca czytniki z rejestru odczytu. Konfigurację zapisu obecności obsługuje API grup RCP.
 
 W bocznym panelu **Czytniki w SmartService** widać wszystkie urządzenia zwrócone przez `Doors`, także bez przypisania w PlanQR. Worker odświeża listę co minutę, a stan odczytuje z `ComponentFullStatus`. `GET /api/kantech/readers/inventory` zwraca ostatnią listę z czasem odczytu administratorowi LDAP. Jeżeli odczyt się nie powiedzie, panel po dwóch minutach oznacza dane jako nieaktualne.
 
@@ -72,7 +72,7 @@ Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatyc
 
 Odczyt karty z adresem w domenie ZUT jest rozpoznawany po loginie przed `@`. Prowadzący otwiera listę na wejściu. Studenci i pozostali prowadzący mogą dopisać się raz przez dowolny czytnik grupy. Listę zamyka osoba, która ją otworzyła, po odbiciu na wyjściu w tej grupie. Czytnik dwukierunkowy pozwala zamknąć listę po upływie co najmniej 60 sekund od otwarcia. Nowe listy zamykają się automatycznie 30 minut przed końcem zajęć. W panelu obecności wyświetlamy login oraz imię i nazwisko z LDAP, gdy profil jest dostępny.
 
-Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu backendu, jeśli baza nie ma jeszcze zapisanych czytników.
+Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu czytników do podglądu odbić, jeśli baza nie ma jeszcze zapisanych czytników.
 
 ### Połączenie workera z PostgreSQL
 
@@ -106,7 +106,7 @@ Administrator LDAP może otworzyć `/adminpanel/kantech?dev=1` albo `/adminpanel
 
 Wybierz ostatnio odczytany alias lub wpisz go ręcznie. `WI_SYNC1`, `wi-sync-1` i `WISYNC_1` oznaczają to samo przypisanie. Uczestnika można zapisać według nazwy, loginu lub numeru albumu. Dla prowadzącego wybierz osobę z Planu ZUT i podaj jej login w PlanQR. Podgląd pokazuje bieżące i najbliższe zajęcia, a zapisane przypisania można edytować.
 
-W symulacji można wywołać odbicie gotowej karty albo wpisać własny alias. Przykładowe zajęcia pozwalają sprawdzić sekwencję prowadzący → uczestnik → prowadzący także poza godzinami zajęć. Tryb Plan ZUT używa bieżącego planu prowadzącego. Wyniki symulacji są tymczasowe.
+W symulacji wybierz urządzenie RCP i jego czytnik. Własny alias domyślnie sprawdza bieżące zajęcia prowadzącego w Planie ZUT. Lista z symulacji jest oznaczona w podglądzie tych zajęć tego samego administratora. Wybór **Przykładowe zajęcia** służy do testowania na fikcyjnym planie. Urządzenie ze spisu SmartService może działać w symulacji przed przypisaniem do grupy. Wyniki symulacji są tymczasowe.
 
 ## Migracje i testy
 
@@ -117,6 +117,6 @@ W symulacji można wywołać odbicie gotowej karty albo wpisać własny alias. P
 
 ## Pilotaż fizyczny
 
-1. Po przygotowaniu bazy i migracji ustaw w prywatnym `.env` serwera `KANTECH_MODE=observe`, `KANTECH_DOOR_IDS=49919`, adres SmartService, dane konta z uprawnieniem do odczytu i odrębny `WORKER_SECRET_TOKEN`. Zbuduj obrazy poleceniem `docker compose build backend frontend` i uruchom `docker compose --profile kantech up -d`.
-2. Zaloguj się ponownie jako administrator przez LDAP i otwórz `/adminpanel/kantech`. Przy czytniku potwierdź status połączenia i odbicia karty prowadzącego, uczestnika i karty nieprzypisanej. Sprawdź, w którym polu SmartService pojawia się `WISYNC_<numer>`, oraz czy zdarzenia wracają po wznowieniu odczytu. Tryb `observe` wyświetla odbicia bez zapisu obecności.
-3. W zakładce **Czytniki** wybierz urządzenie RCP i ustaw role jego czytników. W razie potrzeby przypisz aliasy kart w zakładce **Testy i przypisania**. Po zaliczeniu obserwacji włącz automatyczny zapis obecności i sprawdź otwarcie listy, dopisanie uczestnika, zamknięcie i XLSX.
+1. Po przygotowaniu bazy i migracji ustaw w prywatnym `.env` serwera `KANTECH_MODE=observe`, adres SmartService, dane konta z uprawnieniem do odczytu i odrębny `WORKER_SECRET_TOKEN`. Zbuduj obrazy poleceniem `docker compose build backend frontend` i uruchom `docker compose --profile kantech up -d`.
+2. Zaloguj się jako administrator przez LDAP i otwórz `/adminpanel/kantech`. W zakładce **Czytniki** utwórz grupę, wybierz urządzenie RCP ze spisu SmartService i ustaw role jego czytników.
+3. W **Odczytach na żywo** potwierdź odbicia karty prowadzącego, uczestnika i karty nieprzypisanej. W razie potrzeby przypisz aliasy kart w zakładce **Testy i przypisania**. Włącz automatyczny zapis obecności i sprawdź otwarcie listy, dopisanie uczestnika, zamknięcie i XLSX.

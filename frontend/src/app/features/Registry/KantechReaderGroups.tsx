@@ -1,16 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { rcpDeviceName as deviceName, rcpReaderRoles as roles, type RcpReaderRole as Role } from "./kantechPresentation";
 
-type Role = "ENTRY" | "EXIT" | "BOTH";
-type Reader = { id: string; label: string | null };
-type Device = { id: string; name: string; readers: Reader[] };
-type GroupReader = Reader & { role: Role };
+type GroupReader = { id: string; label: string | null; role: Role };
+type Device = { id: string; name: string; readers: GroupReader[] };
 type Group = { id: number; name: string; devices: { id: string; readers: GroupReader[] }[] };
-type Snapshot = { groups: Group[]; devices: Device[] };
+type Snapshot = { groups: Group[]; devices: Device[]; devTools: boolean };
 type Draft = Omit<Group, "id"> & { id?: number };
 
 const api = "/api/kantech/readers/groups";
-const roles: Record<Role, string> = { ENTRY: "Wejście", EXIT: "Wyjście", BOTH: "Wejście i wyjście" };
-const deviceName = (id: string) => id.replace("@", " · ");
 
 async function request(url: string, options?: RequestInit) {
   const response = await fetch(url, { cache: "no-store", credentials: "include", ...options });
@@ -21,7 +18,7 @@ async function request(url: string, options?: RequestInit) {
   return response;
 }
 
-export function KantechReaderGroups({ onRegistryChange }: { onRegistryChange: () => void }) {
+export function KantechReaderGroups({ onDevToolsChange }: { onDevToolsChange: (enabled: boolean) => void }) {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [draft, setDraft] = useState<Draft>();
   const [selected, setSelected] = useState("");
@@ -33,19 +30,19 @@ export function KantechReaderGroups({ onRegistryChange }: { onRegistryChange: ()
     const controller = new AbortController();
     void request(api, { signal: controller.signal })
       .then((response) => response.json())
-      .then((data: Snapshot) => { if (!controller.signal.aborted) setSnapshot(data); })
+      .then((data: Snapshot) => {
+        if (controller.signal.aborted) return;
+        setSnapshot(data);
+        onDevToolsChange(data.devTools);
+      })
       .catch((cause: Error) => { if (!controller.signal.aborted) setError(cause.message); });
     return () => controller.abort();
-  }, [reload]);
+  }, [reload, onDevToolsChange]);
 
   const available = snapshot?.devices.filter((device) =>
     !draft?.devices.some(({ id }) => id === device.id) &&
     !snapshot.groups.some((group) => group.id !== draft?.id && group.devices.some(({ id }) => id === device.id)),
   ) ?? [];
-  const addReader = (reader: Reader): GroupReader => ({
-    ...reader,
-    role: /\b(?:exit|wyjście)\s*$/iu.test(reader.label ?? "") ? "EXIT" : "ENTRY",
-  });
   const edit = (group?: Group) => {
     setError("");
     setSelected("");
@@ -56,7 +53,7 @@ export function KantechReaderGroups({ onRegistryChange }: { onRegistryChange: ()
         readers: [
           ...device.readers,
           ...snapshot?.devices.find(({ id }) => id === device.id)?.readers
-            .filter((reader) => !device.readers.some(({ id }) => id === reader.id)).map(addReader) ?? [],
+            .filter((reader) => !device.readers.some(({ id }) => id === reader.id)) ?? [],
         ],
       })),
     } : { name: "", devices: [] });
@@ -64,9 +61,7 @@ export function KantechReaderGroups({ onRegistryChange }: { onRegistryChange: ()
   const addDevice = () => {
     const device = available.find(({ id }) => id === selected);
     if (!device || !draft) return;
-    const readers = device.readers.map(addReader);
-    if (readers.length === 1 && readers[0].role === "ENTRY") readers[0].role = "BOTH";
-    setDraft({ ...draft, devices: [...draft.devices, { id: device.id, readers }] });
+    setDraft({ ...draft, devices: [...draft.devices, { id: device.id, readers: device.readers }] });
     setSelected("");
   };
 
@@ -77,7 +72,6 @@ export function KantechReaderGroups({ onRegistryChange }: { onRegistryChange: ()
       await request(url, options);
       setDraft(undefined);
       setReload((value) => value + 1);
-      onRegistryChange();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Nie udało się zmienić grupy.");
     } finally {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { FaDownload, FaFileExport, FaPlus, FaSyncAlt, FaTimes, FaTrash } from "react-icons/fa";
 import "../Registry/AdminRegistry.css";
 import { attendanceStatusLabel, type AttendanceDraft } from "./attendanceDrafts";
@@ -8,6 +8,7 @@ import "./LessonAttendancePanel.css";
 
 interface LessonAttendancePanelProps {
   lessonId?: string | number | null;
+  lessonTitle?: string;
   draft?: AttendanceDraft | null;
   layout?: "panel" | "page";
   isLoading?: boolean;
@@ -17,33 +18,21 @@ interface LessonAttendancePanelProps {
   onCloseList?: () => void;
   onSendList?: () => void;
   onRefresh?: () => void;
-  onAddRow?: (albumNumber: string, enteredAt: string | null) => void;
+  onAddRow?: (albumNumber: string, enteredAt: string | null) => Promise<boolean>;
   onRemoveRow?: (rowId: string, userId?: number) => void;
   onClosePanel?: () => void;
 }
 
-const formatSentAt = (value?: string | null) => {
-  if (!value) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat("pl-PL", {
-    hour: "2-digit",
-    minute: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
-};
-
-const buildCurrentTime = () =>
-  new Intl.DateTimeFormat("pl-PL", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date());
+const timeFormat = new Intl.DateTimeFormat("pl-PL", {
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+const activityFormat = new Intl.DateTimeFormat("pl-PL", {
+  hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit",
+});
 
 export default function LessonAttendancePanel({
   lessonId,
+  lessonTitle,
   draft,
   layout = "panel",
   isLoading = false,
@@ -57,13 +46,24 @@ export default function LessonAttendancePanel({
   onRemoveRow,
   onClosePanel,
 }: LessonAttendancePanelProps) {
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [addError, setAddError] = useState(false);
   const [albumInput, setAlbumInput] = useState("");
   const [timeInput, setTimeInput] = useState("");
+  const addButton = useRef<HTMLButtonElement>(null);
+  const albumField = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    setAdding(false);
+    setAddError(false);
     setAlbumInput("");
-    setTimeInput(buildCurrentTime());
-  }, [lessonId]);
+    setTimeInput("");
+  }, [lessonId, draft?.sessionId, draft?.status]);
+
+  useEffect(() => {
+    if (adding) albumField.current?.focus();
+  }, [adding]);
 
   useEffect(() => {
     if (!lessonId || !onRefresh || isLoading || (draft?.status !== "idle" && draft?.status !== "open")) return;
@@ -73,210 +73,166 @@ export default function LessonAttendancePanel({
 
   if (!lessonId || !draft) {
     return (
-      <section
-        className={`lesson-attendance lesson-attendance--empty lesson-attendance--${layout}`}
-      >
-        <div className="lesson-attendance__empty">
-          <h2>Wybierz zajęcia</h2>
-          <p>Panel obecności otwiera się z prawej strony.</p>
-        </div>
+      <section className={`lesson-attendance lesson-attendance--${layout}`}>
+        <div className="lesson-attendance__body"><p className="lesson-attendance__empty">Wybierz zajęcia, aby zobaczyć listę obecności.</p></div>
         {!readOnly && <AttendanceChoices />}
       </section>
     );
   }
 
-  const isOpen = draft.status === "open";
-  const canCheckScan = draft.status === "idle";
-  const readerClosesList = draft.readerGroup || Boolean(draft.exitReaderId);
-  const canClose = draft.status === "open" && !readerClosesList;
-  const canSend = draft.status === "closed";
   const hasSession = Boolean(draft.sessionId);
-  const addDisabled = !isOpen || !hasSession || albumInput.trim().length === 0;
-  const canDownload = hasSession;
+  const hasList = hasSession || draft.simulated;
+  const canEdit = hasSession && !readOnly && draft.status === "open";
+  const canAdd = Boolean(canEdit && onAddRow);
+  const canClose = canEdit && !draft.readerGroup && !draft.exitReaderId && Boolean(onCloseList);
+  const canSend = hasSession && !readOnly && draft.status === "closed" && Boolean(onSendList);
+  const canCheckScan = draft.status === "idle" && Boolean(onOpenList);
+  const lessonSummary = layout === "page" ? [draft.title, draft.room, draft.group && `Grupa ${draft.group}`].filter(Boolean).join(" · ") : "";
+  const closeForm = () => {
+    setAdding(false);
+    setAddError(false);
+    setAlbumInput("");
+    window.requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const album = albumInput.trim();
+    if (!canAdd || !onAddRow || !album || isLoading || saving) return;
+    setSaving(true);
+    setAddError(false);
+    try {
+      if (await onAddRow(album, timeInput || null)) closeForm();
+      else setAddError(true);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <section className={`lesson-attendance lesson-attendance--${layout}`}>
       <header className="lesson-attendance__header">
-        <strong>Lista obecności</strong>
-
-        <div className="lesson-attendance__header-actions">
-          <div className="lesson-attendance__status">
-            <strong>{attendanceStatusLabel[draft.status]}</strong>
+        <div className="lesson-attendance__heading">
+          <h2>Lista obecności</h2>
+          {lessonTitle && <p className="lesson-attendance__lesson">{lessonTitle}</p>}
+          <div className="lesson-attendance__summary">
+            <span className="lesson-attendance__status" data-status={draft.status}>{attendanceStatusLabel[draft.status]}</span>
+            {draft.simulated && <span className="lesson-attendance__status">Symulacja Kantecha</span>}
+            {hasList && <span>Wpisy · {draft.rows.length}</span>}
           </div>
-
-          {onRefresh ? (
-            <button
-              type="button"
-              className="admin-icon-button"
-              onClick={onRefresh}
-              disabled={isLoading}
-              aria-label="Odśwież listę obecności"
-              title="Odśwież"
-            >
-              <FaSyncAlt />
-            </button>
-          ) : null}
-
-          {onClosePanel ? (
-            <button
-              type="button"
-              className="admin-icon-button"
-              onClick={onClosePanel}
-              aria-label="Zamknij panel obecności"
-            >
-              <FaTimes />
-            </button>
-          ) : null}
+        </div>
+        <div className="lesson-attendance__header-actions">
+          {onRefresh && <button type="button" className="admin-icon-button" onClick={onRefresh}
+            disabled={isLoading} aria-label="Odśwież listę obecności" title="Odśwież">
+            <FaSyncAlt aria-hidden="true" />
+          </button>}
+          {onClosePanel && <button type="button" className="admin-icon-button" data-panel-close onClick={onClosePanel}
+            aria-label="Zamknij panel obecności" title="Zamknij">
+            <FaTimes aria-hidden="true" />
+          </button>}
         </div>
       </header>
 
-      {!readOnly && <AttendanceChoices />}
-
-      {hasSession && (
-        <div className="lesson-attendance__feedback">
-          {[draft.title, draft.room, draft.group && `Grupa ${draft.group}`].filter(Boolean).join(" · ")}
-          {draft.readerGroup && <div>Prowadzący zamyka listę na wyjściu z grupy czytników.</div>}
-          {!draft.readerGroup && draft.exitReaderId && (
-            <div>{draft.doorId === draft.exitReaderId
-              ? `Czytnik ${draft.doorId} · wejście i wyjście. Zamknięcie po minucie od otwarcia.`
-              : `Czytniki ${draft.doorId} → ${draft.exitReaderId}`}</div>
-          )}
-        </div>
-      )}
-
-      {!readOnly && <div className="lesson-attendance__composer">
-        <input
-          type="text"
-          value={albumInput}
-          placeholder="Numer albumu lub karta"
-          onChange={(event) => setAlbumInput(event.target.value)}
-          disabled={!isOpen || !hasSession}
-        />
-
-        <input
-          type="time"
-          value={timeInput}
-          onChange={(event) => setTimeInput(event.target.value)}
-          disabled={!isOpen || !hasSession}
-        />
-
-        <button
-          type="button"
-          className="admin-button admin-button--primary admin-button--small"
-          disabled={addDisabled}
-          onClick={() => {
-            if (!onAddRow || addDisabled) {
-              return;
-            }
-
-            onAddRow(albumInput.trim(), timeInput || null);
-            setAlbumInput("");
-            setTimeInput(buildCurrentTime());
-          }}
-        >
-          <FaPlus />
-          Dodaj
-        </button>
-      </div>}
-
-      <div className="lesson-attendance__list-shell">
-        {error ? (
-          <div className="lesson-attendance__feedback lesson-attendance__feedback--error">
-            {error}
+      <div className="lesson-attendance__body" aria-busy={isLoading && !draft.loadedAt}>
+        {!readOnly && <AttendanceChoices />}
+        {lessonSummary && <p className="lesson-attendance__context">{lessonSummary}</p>}
+        {canEdit && draft.readerGroup && <p className="lesson-attendance__context">Zamknięcie listy po odbiciu na wyjściu z grupy.</p>}
+        {canEdit && !draft.readerGroup && draft.exitReaderId && (
+          <p className="lesson-attendance__context">{draft.doorId === draft.exitReaderId
+            ? `Czytnik ${draft.doorId} · zamknięcie po minucie od otwarcia.`
+            : `Czytniki ${draft.doorId} → ${draft.exitReaderId}`}</p>
+        )}
+        {canAdd && (
+          <div className="lesson-attendance__add">
+            <button ref={addButton} type="button" className="admin-button admin-button--secondary admin-button--small"
+              aria-expanded={adding} hidden={adding} onClick={() => {
+                setTimeInput(timeFormat.format(new Date()));
+                setAdding(true);
+              }}>
+              <FaPlus aria-hidden="true" /> Dodaj osobę
+            </button>
+            {adding && (
+              <form className="lesson-attendance__composer" onSubmit={(event) => void submit(event)}>
+                <div className="lesson-attendance__fields">
+                  <label>Numer albumu lub karta
+                    <input ref={albumField} type="text" value={albumInput} autoComplete="off" required maxLength={100}
+                      onChange={(event) => setAlbumInput(event.target.value)} disabled={saving} />
+                  </label>
+                  <label>Godzina
+                    <input type="time" value={timeInput} onChange={(event) => setTimeInput(event.target.value)} disabled={saving} />
+                  </label>
+                </div>
+                <div className="lesson-attendance__composer-actions">
+                  <button type="button" className="admin-button admin-button--ghost admin-button--small" disabled={saving}
+                    onClick={closeForm}>Anuluj</button>
+                  <button type="submit" className="admin-button admin-button--primary admin-button--small"
+                    disabled={isLoading || saving || !albumInput.trim()}>{saving ? "Dodawanie…" : "Dodaj do listy"}</button>
+                </div>
+                {addError && <p className="lesson-attendance__feedback" role="alert">
+                  Nie udało się dodać osoby. Sprawdź dane i spróbuj ponownie.
+                </p>}
+              </form>
+            )}
           </div>
-        ) : null}
+        )}
 
+        {error && !addError && <p className="lesson-attendance__feedback" role="alert">{error}</p>}
         {isLoading && !draft.loadedAt ? (
-          <div className="lesson-attendance__feedback">Wczytywanie listy obecności...</div>
+          <p className="lesson-attendance__empty" role="status">Wczytywanie listy obecności…</p>
         ) : draft.rows.length === 0 ? (
-          <div className="lesson-attendance__empty-inline">
-            {hasSession ? "Brak wpisów." : "Dla tych zajęć nie ma jeszcze sesji obecności."}
-          </div>
+          <p className="lesson-attendance__empty">
+            {hasList ? "Brak wpisów." : "Dla tych zajęć nie ma jeszcze sesji obecności."}
+          </p>
         ) : (
           <ul className="lesson-attendance__list">
-            {draft.rows.map((row) => (
-              <li key={row.id} className="lesson-attendance__line">
-                <div className="lesson-attendance__line-main">
-                  <strong>{row.username || row.albumNumber || row.displayName}</strong>
-                  {row.displayName && row.username && row.displayName !== row.username ? (
-                    <>
-                      <span className="lesson-attendance__separator">/</span>
-                      <span>{[row.givenName, row.surname].filter(Boolean).join(" ") || row.displayName}</span>
-                    </>
-                  ) : null}
-                  <span className="lesson-attendance__separator">—</span>
-                  <span>{row.enteredAt || "--:--"}</span>
-                  <span className="lesson-attendance__source">
-                    {row.source === "scanner"
-                      ? `skaner${row.scanCount && row.scanCount > 1 ? ` x${row.scanCount}` : ""}`
-                      : "ręczny"}
-                  </span>
-                </div>
-
-                {!readOnly && <button
-                  type="button"
-                  className="admin-button admin-button--ghost admin-button--small"
-                  disabled={!isOpen}
-                  onClick={() => onRemoveRow?.(row.id, row.userId)}
-                >
-                  <FaTrash />
-                  Usuń
-                </button>}
-              </li>
-            ))}
+            {draft.rows.map((row) => {
+              const account = row.username || row.albumNumber;
+              const name = [row.givenName, row.surname].filter(Boolean).join(" ") || row.displayName;
+              const identity = account || name;
+              return (
+                <li key={row.id} className="lesson-attendance__line">
+                  <div className="lesson-attendance__person">
+                    <strong>{identity}</strong>
+                    {name && name !== identity && <span>{name}</span>}
+                  </div>
+                  <div className="lesson-attendance__entry">
+                    <time>{row.enteredAt || "—"}</time>
+                    <span>{row.source === "scanner"
+                      ? `Skan${row.scanCount && row.scanCount > 1 ? ` ×${row.scanCount}` : ""}` : "Ręcznie"}</span>
+                  </div>
+                  {canEdit && onRemoveRow && (
+                    <button type="button" className="admin-icon-button" onClick={() => onRemoveRow(row.id, row.userId)}
+                      disabled={isLoading} aria-label={`Usuń wpis ${identity}`} title="Usuń wpis">
+                      <FaTrash aria-hidden="true" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
 
-      <footer className="lesson-attendance__footer">
-        <div className="lesson-attendance__footer-note">
-          {draft.sentAt
-            ? `Wysłano ${formatSentAt(draft.sentAt)}`
-            : draft.loadedAt
-              ? `Wczytano ${formatSentAt(draft.loadedAt)}`
-              : ""}
-          {draft.sessionId ? ` · sesja: ${draft.sessionId}` : ""}
-          {draft.totalPresent ? ` · wpisy: ${draft.totalPresent}` : ""}
-          {draft.truncated ? " · wynik obcięty" : ""}
-        </div>
-
-        <div className="lesson-attendance__footer-actions">
-          <button
-            type="button"
-            className="admin-button admin-button--ghost admin-button--small"
-            disabled={!canDownload}
-            onClick={() => downloadAttendanceXlsx(draft, lessonId)}
-          >
-            <FaDownload />
-            Pobierz XLSX
-          </button>
-          {onOpenList && <button
-            type="button"
-            className="admin-button admin-button--secondary admin-button--small"
-            disabled={!canCheckScan || isLoading}
-            onClick={onOpenList}
-          >
-            Sprawdź odbicie
-          </button>}
-          {!readOnly && !readerClosesList && <button
-            type="button"
-            className="admin-button admin-button--ghost admin-button--small"
-            disabled={!canClose || !hasSession}
-            onClick={onCloseList}
-          >
-            Zamknij listę
-          </button>}
-          {!readOnly && <button
-            type="button"
-            className="admin-button admin-button--primary admin-button--small"
-            disabled={!canSend || !hasSession}
-            onClick={onSendList}
-          >
-            <FaFileExport />
-            Wyślij listę
-          </button>}
-        </div>
-      </footer>
+      {(hasList || canCheckScan) && (
+        <footer className="lesson-attendance__footer">
+          {(draft.sentAt || draft.truncated) && <span className="lesson-attendance__context">
+            {draft.sentAt && `Wysłano ${activityFormat.format(new Date(draft.sentAt))}`}
+            {draft.truncated && `${draft.sentAt ? " · " : ""}Pokazano część wpisów`}
+          </span>}
+          <div className="lesson-attendance__footer-actions">
+            {hasList && <button type="button" className="admin-button admin-button--ghost admin-button--small"
+              onClick={() => downloadAttendanceXlsx(draft, lessonId)}>
+              <FaDownload aria-hidden="true" /> Pobierz XLSX
+            </button>}
+            {canCheckScan && <button type="button" className="admin-button admin-button--secondary admin-button--small"
+              disabled={isLoading} onClick={onOpenList}>Sprawdź odbicie</button>}
+            {canClose && <button type="button" className="admin-button admin-button--secondary admin-button--small"
+              disabled={isLoading} onClick={onCloseList}>Zamknij listę</button>}
+            {canSend && <button type="button" className="admin-button admin-button--primary admin-button--small"
+              disabled={isLoading} onClick={onSendList}><FaFileExport aria-hidden="true" /> Wyślij listę</button>}
+          </div>
+        </footer>
+      )}
     </section>
   );
 }

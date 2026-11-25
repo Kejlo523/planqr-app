@@ -1,7 +1,7 @@
 import { AttendanceScan, KantechEvent, Prisma, PrismaClient } from '@prisma/client';
 import { env } from '../config/env';
 import { findLecturerLessons, findLessons } from './schedule';
-import { ATTENDANCE_RULES_VERSION, attendanceDeadline, buildTimeline, isReaderGroupScope, Lesson, lessonSchema, readerGroupScope } from './timeline';
+import { ATTENDANCE_RULES_VERSION, attendanceDeadline, buildTimeline, Lesson, lessonSchema, readerGroupScope } from './timeline';
 import { cardAliasKeys, normalizeCardLogin } from './cardAlias';
 import { attendanceIdentity } from './identity';
 
@@ -97,10 +97,21 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
         tx.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
         tx.ldapUser.findMany({ where: { username: { in: [...new Set(events.map((event) => normalizeCardLogin(event.alias)))] } } }),
     ]);
-    const grouped = reader?.groupId != null;
-    const entry = !grouped && reader?.direction === 'EXIT' ? reader.entryReader : reader;
+    const groupScope = reader?.groupId != null ? readerGroupScope(reader.groupId) : null;
+    const entry = !groupScope && reader?.direction === 'EXIT' ? reader.entryReader : reader;
     const exitReaderId = entry?.singleReader ? entry.id : entry?.exitReaderId ?? null;
-    const readerScope = reader?.groupId != null ? readerGroupScope(reader.groupId) : `reader:${entry?.id ?? readerId}`;
+    const attendanceTimes = events.flatMap((event) =>
+        event.captureMode === 'attendance' && event.occurredAt && event.granted ? [+event.occurredAt] : []);
+    // Old lists can still receive taps in their original scope until they close.
+    const legacySessions = !groupScope && entry?.direction && attendanceTimes.length
+        ? await tx.attendanceSession.findMany({
+            where: {
+                readerId: entry.id, roomKey: { not: { startsWith: 'group:' } },
+                voided: false, openedAt: { lte: new Date(Math.max(...attendanceTimes)) },
+                OR: [{ closesAt: null }, { closesAt: { gt: new Date(Math.min(...attendanceTimes)) } }],
+            },
+            select: { roomKey: true, openedAt: true, closesAt: true }, orderBy: { openedAt: 'desc' },
+        }) : [];
     const cards = new Map(assignments.map((card) => [card.alias, card]));
     const profilesByLogin = new Map(profiles.map((profile) => [profile.username, profile]));
     const results = new Map<string, string[]>();
@@ -111,48 +122,35 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
         const card = attendanceIdentity(event.alias, binding, profilesByLogin.get(normalizeCardLogin(event.alias)));
         const { occurredAt } = event;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
-            : !event.granted ? 'access_denied' : !card ? 'unknown_card'
-            : !grouped && !exitReaderId && event.captureMode === 'attendance' ? 'reader_without_pair' : null;
+            : !event.granted ? 'access_denied' : !card ? 'unknown_card' : null;
         let outcome = invalid ?? 'observed';
-        if (reader?.direction && entry && card && occurredAt && !invalid && event.captureMode === 'attendance') {
+        if (reader && card && occurredAt && !invalid && event.captureMode === 'attendance') {
             outcome = 'outside_cutover';
             const cutover = event.captureActiveFrom?.getTime() ?? legacyCutover;
             if (+occurredAt >= cutover && +occurredAt <= Date.now() + 60_000) {
-                outcome = 'received';
-                data.push({
-                    id: event.id, readerId, roomKey: readerScope, buildingId: entry.buildingId, roomNumber: entry.roomNumber,
-                    roomLabel: reader.group?.name ?? entry.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
-                    readerDirection: reader.direction, exitReaderId, isLecturer: card.isLecturer,
-                    rulesVersion: ATTENDANCE_RULES_VERSION,
-                    scheduleId: card.scheduleId, occurredAt, receivedAt: event.receivedAt,
-                    resolution: card.isLecturer && reader.direction === 'ENTRY' ? 'pending' : 'none',
-                    retryAt: card.isLecturer && reader.direction === 'ENTRY' ? new Date() : null,
-                });
+                const roomKey = groupScope ?? legacySessions.find(({ openedAt, closesAt }) =>
+                    occurredAt >= openedAt && (!closesAt || occurredAt < closesAt))?.roomKey;
+                outcome = 'reader_without_group';
+                if (roomKey && reader.direction && entry) {
+                    const canOpen = Boolean(groupScope) && card.isLecturer && reader.direction === 'ENTRY';
+                    outcome = 'received';
+                    data.push({
+                        id: event.id, readerId, roomKey, buildingId: entry.buildingId, roomNumber: entry.roomNumber,
+                        roomLabel: reader.group?.name ?? entry.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
+                        readerDirection: reader.direction, exitReaderId, isLecturer: card.isLecturer,
+                        rulesVersion: ATTENDANCE_RULES_VERSION,
+                        scheduleId: card.scheduleId, occurredAt, receivedAt: event.receivedAt,
+                        resolution: canOpen ? 'pending' : 'none', retryAt: canOpen ? new Date() : null,
+                    });
+                }
             }
         }
         const ids = results.get(outcome) ?? [];
         ids.push(event.id);
         results.set(outcome, ids);
     }
-    if (data.length && entry) {
-        const times = data.map(({ occurredAt }) => +occurredAt);
-        const earliest = new Date(Math.min(...times));
-        const latest = new Date(Math.max(...times));
-        // Keep late taps and lists already open on a legacy room timeline attached to that list.
-        const legacySessions = grouped ? [] : await tx.attendanceSession.findMany({
-            where: {
-                readerId: entry.id, roomKey: { not: readerScope }, voided: false, openedAt: { lte: latest },
-                OR: [{ closesAt: null }, { closesAt: { gt: earliest } }],
-            },
-            select: { roomKey: true, openedAt: true, closesAt: true }, orderBy: { openedAt: 'desc' },
-        });
-        const scopes = new Set<string>();
-        for (const scan of data) {
-            const legacy = legacySessions.find(({ openedAt, closesAt }) =>
-                scan.occurredAt >= openedAt && (!closesAt || scan.occurredAt < closesAt));
-            if (legacy && !isReaderGroupScope(legacy.roomKey)) scan.roomKey = legacy.roomKey;
-            scopes.add(scan.roomKey);
-        }
+    if (data.length) {
+        const scopes = new Set(data.map(({ roomKey }) => roomKey));
         for (const scope of [...scopes].sort()) await lockRoom(tx, scope);
         const result = await tx.attendanceScan.createMany({ data, skipDuplicates: true });
         if (result.count) {

@@ -2,15 +2,17 @@ import { timingSafeEqual } from 'node:crypto';
 import { auditAction } from '../middlewares/auditMiddleware';
 import { json, NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
+import { DateTime } from 'luxon';
 import { env } from '../config/env';
 import { getMonitor, incomingReport } from '../attendance/monitor';
 import { captureSettingsInput, readCaptureSettings, updateCaptureSettings } from '../attendance/captureSettings';
 import { saveReaderReport } from '../attendance/reports';
 import { inventoryReaders, saveInventory } from '../attendance/inventory';
-import { deleteReaderGroup, listReaderGroups, readerGroupInput, saveReaderGroup } from '../attendance/readerGroups';
+import { deleteReaderGroup, listKantechDevices, listReaderGroups, readerGroupInput, saveReaderGroup } from '../attendance/readerGroups';
+import { CAMPUS_ZONE } from '../attendance/scheduleTime';
 import { attendanceDb } from '../attendance/store';
 import {
-    deleteReader, listReaders, ReaderConfigurationError, readerIdSchema, readerInput, readerSetupInput, saveReader, saveReaderSetup,
+    listReaders, ReaderConfigurationError,
 } from '../attendance/readers';
 import { attendanceScanRateLimiter } from '../middlewares/securityMiddleware';
 import { requireLdapAdmin } from '../middlewares/authMiddleware';
@@ -19,10 +21,18 @@ export const kantechIngress = Router();
 export const kantechEvents = Router();
 export const kantechReaders = Router();
 
+const campusDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+    .transform((value) => DateTime.fromISO(value, { zone: CAMPUS_ZONE }))
+    .refine((date) => date.isValid);
 const query = z.object({
     readerId: z.string().trim().min(1).max(64).optional(),
+    deviceId: z.string().trim().min(1).max(64).optional(),
+    search: z.string().trim().max(128).refine((value) => !value.includes('\0')).optional(),
+    outcome: z.string().regex(/^[a-z_]{1,40}$/).optional(),
+    from: campusDate.optional(),
+    to: campusDate.optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
-});
+}).refine(({ from, to }) => !from || !to || from <= to);
 
 /**
  * @swagger
@@ -34,6 +44,11 @@ const query = z.object({
  *       - bearerAuth: []
  *     parameters:
  *       - { name: readerId, in: query, schema: { type: string } }
+ *       - { name: deviceId, in: query, schema: { type: string } }
+ *       - { name: search, in: query, schema: { type: string } }
+ *       - { name: outcome, in: query, schema: { type: string } }
+ *       - { name: from, in: query, schema: { type: string, format: date } }
+ *       - { name: to, in: query, schema: { type: string, format: date } }
  *       - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
  *     responses:
  *       200: { description: 'Mode, readers, and recent events with full card identifiers in label' }
@@ -63,10 +78,14 @@ kantechEvents.get('/', requireLdapAdmin, async (req, res) => {
     }
     res.set('Cache-Control', 'no-store');
     try {
-        const [monitor, settings] = await Promise.all([
-            getMonitor(attendanceDb, parsed.data.readerId, parsed.data.limit),
+        const [devices, settings] = await Promise.all([
+            listKantechDevices(),
             env.KANTECH_MODE === 'off' ? null : readCaptureSettings(attendanceDb),
         ]);
+        const { from, to, ...filters } = parsed.data;
+        const monitor = await getMonitor(attendanceDb, devices, {
+            ...filters, from: from?.toJSDate(), before: to?.plus({ days: 1 }).toJSDate(),
+        });
         res.json({ mode: settings?.mode ?? env.KANTECH_MODE, devTools: env.KANTECH_DEV_TOOLS, ...monitor });
     } catch {
         res.status(503).json({ message: 'Reader monitor unavailable' });
@@ -180,7 +199,7 @@ kantechReaders.get('/inventory', async (_req, res) => {
 
 kantechReaders.get('/groups', async (_req, res) => {
     try {
-        res.json(await listReaderGroups());
+        res.json({ ...await listReaderGroups(), devTools: env.KANTECH_DEV_TOOLS });
     } catch {
         res.status(503).json({ message: 'Nie udało się pobrać grup i urządzeń RCP.' });
     }
@@ -205,59 +224,5 @@ kantechReaders.delete('/groups/:id', auditAction('KANTECH', 'Usunięto grupę ur
         if (error instanceof z.ZodError) res.status(400).json({ message: 'Nieprawidłowe ID grupy.' });
         else if (error instanceof ReaderConfigurationError) res.status(409).json({ message: error.message });
         else res.status(503).json({ message: 'Nie udało się usunąć grupy RCP.' });
-    }
-});
-
-kantechReaders.post('/', auditAction('KANTECH', 'Zapisano czytnik', (req) => req.body?.id), async (req, res) => {
-    const input = readerInput.safeParse(req.body);
-    if (!input.success) {
-        const assignmentError = input.error.issues.find(({ code }) => code === 'custom');
-        res.status(400).json({ message: assignmentError?.message ?? 'Sprawdź ID, nazwę i dane sali.' });
-        return;
-    }
-    try {
-        res.json(await saveReader(input.data));
-    } catch (error) {
-        if (error instanceof ReaderConfigurationError) {
-            res.status(409).json({ message: error.message });
-            return;
-        }
-        res.status(503).json({ message: 'Nie udało się zapisać czytnika.' });
-    }
-});
-
-kantechReaders.post('/setup', auditAction('KANTECH', 'Skonfigurowano wejście i wyjście', (req) => req.body?.entry?.id), async (req, res) => {
-    const input = readerSetupInput.safeParse(req.body);
-    if (!input.success) {
-        res.status(400).json({ message: input.error.issues.find(({ code }) => code === 'custom')?.message
-            ?? 'Uzupełnij ID i nazwę dla każdego używanego czytnika.' });
-        return;
-    }
-    try {
-        res.status(input.data.edit ? 200 : 201).json(await saveReaderSetup(input.data));
-    } catch (error) {
-        if (error instanceof ReaderConfigurationError) {
-            res.status(409).json({ message: error.message });
-            return;
-        }
-        res.status(503).json({ message: 'Nie udało się zapisać konfiguracji czytników.' });
-    }
-});
-
-kantechReaders.delete('/:id', auditAction('KANTECH', 'Usunięto czytnik'), async (req, res) => {
-    const id = readerIdSchema.safeParse(req.params.id);
-    if (!id.success) {
-        res.status(400).json({ message: 'Nieprawidłowe ID czytnika.' });
-        return;
-    }
-    try {
-        await deleteReader(id.data);
-        res.sendStatus(204);
-    } catch (error) {
-        if (error instanceof ReaderConfigurationError) {
-            res.status(409).json({ message: error.message });
-            return;
-        }
-        res.status(503).json({ message: 'Nie udało się usunąć czytnika.' });
     }
 });

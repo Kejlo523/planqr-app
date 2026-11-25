@@ -23,9 +23,12 @@ export interface LessonAttendanceStudent {
 
 export interface LessonAttendanceList {
   status: AttendanceListStatus;
-  sessionId: number;
-  dydaktykId: number;
+  sessionId: number | null;
+  dydaktykId: number | null;
+  simulated?: boolean;
   title?: string;
+  lessonStart?: string;
+  lessonEnd?: string;
   room?: string;
   group?: string | null;
   exitReaderId?: string | null;

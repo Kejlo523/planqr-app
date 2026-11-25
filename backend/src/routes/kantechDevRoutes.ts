@@ -5,6 +5,7 @@ import { AuthRequest, requireLdapAdmin } from '../middlewares/authMiddleware';
 import { attendanceScanRateLimiter } from '../middlewares/securityMiddleware';
 import { normalizeCardAlias } from '../attendance/cardAlias';
 import { getSimulation, resetSimulation, simulateScan } from '../attendance/devSimulation';
+import { listKantechDevices } from '../attendance/readerGroups';
 import { getObservedAliases } from '../attendance/monitor';
 import { getTeacherSchedule } from '../attendance/schedule';
 import { attendanceDb } from '../attendance/store';
@@ -19,7 +20,7 @@ const mapping = z.discriminatedUnion('role', [
     z.object({ alias: text, role: z.literal('lecturer'), login: text, name: text, scheduleId: text }),
 ]);
 const simulation = z.object({
-    readerId: text.max(64), alias: text,
+    readerId: text.max(64), deviceId: text.max(64).optional(), alias: text,
     source: z.enum(['demo', 'live']), granted: z.boolean().default(true),
 });
 const owner = (req: AuthRequest) => req.user!.login.toLowerCase();
@@ -47,12 +48,13 @@ const api = (handler: (req: AuthRequest, res: Response) => Promise<void>) =>
     };
 
 kantechDevRoutes.get('/', api(async (req, res) => {
-    const [cards, readers, observed] = await Promise.all([
+    const [cards, readers, devices, observed] = await Promise.all([
         attendanceDb.attendanceCard.findMany({ orderBy: { alias: 'asc' } }),
         listReaders(),
+        listKantechDevices(),
         getObservedAliases(attendanceDb),
     ]);
-    res.json({ cards, readers, observed, simulated: getSimulation(owner(req)) });
+    res.json({ cards, readers, devices, observed, simulated: getSimulation(owner(req)) });
 }));
 
 kantechDevRoutes.post('/cards', auditAction('KANTECH', 'Zapisano przypisanie karty'), api(async (req, res) => {

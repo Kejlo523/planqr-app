@@ -29,6 +29,7 @@ export interface LessonAttendanceList {
   room?: string;
   group?: string | null;
   exitReaderId?: string | null;
+  readerGroup?: boolean;
   lecturerId: string | null;
   lecturerUsername: string;
   lecturerDisplayName: string;

@@ -4,7 +4,7 @@ import { cardAliasKeys, normalizeCardAlias, normalizeCardLogin } from './cardAli
 import { findLecturerLessons, findLessons } from './schedule';
 import { attendanceIdentity } from './identity';
 import { attendanceDb } from './store';
-import { buildTimeline, Scan } from './timeline';
+import { ATTENDANCE_RULES_VERSION, buildTimeline, readerGroupScope, Scan } from './timeline';
 
 interface SimulationInput {
     readerId: string;
@@ -52,7 +52,8 @@ export async function simulateScan(login: string, input: SimulationInput) {
     const demoCard = input.source === 'demo' ? demoCards.get(alias) : undefined;
     const card = attendanceIdentity(input.alias, binding, profile)
         ?? (demoCard && { ...demoCard, isLecturer: Boolean(demoCard.scheduleId) });
-    const entry = reader?.direction === 'EXIT' ? reader.entryReader : reader;
+    const groupId = reader?.groupId;
+    const entry = groupId == null && reader?.direction === 'EXIT' ? reader.entryReader : reader;
     const exitReaderId = entry?.singleReader ? entry.id : entry?.exitReaderId ?? null;
     const events = simulations.get(login) ?? [];
     const last = events[events.length - 1];
@@ -67,21 +68,24 @@ export async function simulateScan(login: string, input: SimulationInput) {
         event.outcome = 'unknown_card';
     } else if (input.source === 'live' && !reader) {
         event.outcome = 'unknown_reader';
-    } else if (input.source === 'live' && !exitReaderId) {
+    } else if (input.source === 'live' && groupId == null && !exitReaderId) {
         event.outcome = 'reader_without_pair';
     } else {
         const demoStart = Date.parse(events.find((item) => item.source === 'demo')?.occurredAt ?? event.occurredAt);
-        const candidates = card.isLecturer && (!exitReaderId || reader?.direction === 'ENTRY') ? input.source === 'demo' ? [{
+        const configured = groupId != null || Boolean(exitReaderId);
+        const candidates = card.isLecturer && (!configured || reader?.direction === 'ENTRY') ? input.source === 'demo' ? [{
             id: 'demo', key: 'demo-session', title: 'Zajęcia testowe',
             start: new Date(demoStart).toISOString(),
             end: new Date(demoStart + 60 * 60_000).toISOString(),
         }] : card.scheduleId ? await findLessons(card.scheduleId, at, env.ZUT_ATTENDANCE_SCHEDULE_URL)
             : await findLecturerLessons(card.login, profile, at) : [];
-        const simulatedRoom = JSON.stringify([input.source, entry?.id ?? input.readerId]);
+        const scope = JSON.stringify([input.source, groupId ?? entry?.id ?? input.readerId]);
+        const simulatedRoom = groupId != null ? readerGroupScope(groupId) + ':' + scope : scope;
         event.scan = {
             id, readerId: input.readerId, roomKey: simulatedRoom, roomLabel: entry?.label ?? 'Sala testowa',
             alias, login: card.login, name: card.name, album: card.album, scheduleId: card.scheduleId,
-            readerDirection: exitReaderId ? reader?.direction : null, exitReaderId, isLecturer: card.isLecturer,
+            readerDirection: configured ? reader?.direction : null, exitReaderId, isLecturer: card.isLecturer,
+            rulesVersion: configured ? ATTENDANCE_RULES_VERSION : undefined,
             occurredAt: at, candidates, selectedKey: null, resolution: 'no_match',
         };
         const scans = events.flatMap((item) => item.scan?.roomKey === simulatedRoom ? [item.scan] : []);

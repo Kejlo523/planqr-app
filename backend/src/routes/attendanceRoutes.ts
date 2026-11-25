@@ -5,6 +5,9 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { AuthRequest, requireLecturerAccess } from '../middlewares/authMiddleware';
 import { CAMPUS_ZONE } from '../attendance/scheduleTime';
+import { isReaderGroupScope } from '../attendance/timeline';
+import { LdapDirectoryService } from '../services/ldapDirectoryService';
+import { findCachedLdapUsersByUsername, upsertCachedLdapUser } from '../services/ldapUserCacheService';
 import {
     attendanceDb, lockRoom, projectRoom, readCandidates,
 } from '../attendance/store';
@@ -24,15 +27,43 @@ const memberBody = z.object({
 });
 
 type SessionWithMembers = AttendanceSession & { members: AttendanceMember[] };
-const memberView = (member: AttendanceMember) => ({
+const directory = new LdapDirectoryService();
+const nextProfileLookup = new Map<string, number>();
+const profileLogin = (member: AttendanceMember) => /^\d+$/.test(member.login) ? 's' + member.login : member.login;
+type MemberProfile = { displayName: string; givenName: string | null; surname: string | null };
+
+async function memberProfiles(members: AttendanceMember[]) {
+    const usernames = [...new Set(members.map(profileLogin))];
+    const profiles = new Map<string, MemberProfile>(await findCachedLdapUsersByUsername(usernames));
+    if (!directory.isConfigured()) return profiles;
+    const now = Date.now();
+    for (const [username, retryAt] of nextProfileLookup) {
+        if (retryAt <= now) nextProfileLookup.delete(username);
+    }
+    const missing = usernames.filter((username) => !profiles.has(username) && !nextProfileLookup.has(username));
+    if (missing.length) {
+        for (const username of missing) nextProfileLookup.set(username, now + 5 * 60_000);
+        try {
+            for (const [username, profile] of await directory.findUsers(missing)) {
+                profiles.set(username, profile);
+                await upsertCachedLdapUser(profile);
+            }
+        } catch {
+            console.error('[Attendance] LDAP participant lookup is unavailable.');
+        }
+    }
+    return profiles;
+}
+
+const memberView = (member: AttendanceMember, profile?: MemberProfile) => ({
     id: member.id,
     userId: member.id,
     studentId: member.login,
     albumNumber: member.album ?? '',
-    username: member.login,
-    displayName: member.name,
-    givenName: null,
-    surname: null,
+    username: profileLogin(member),
+    displayName: profile?.displayName || member.name,
+    givenName: profile?.givenName || null,
+    surname: profile?.surname || null,
     cardHex: '',
     present: true,
     source: member.manual ? 'manual' : 'scanner',
@@ -46,7 +77,7 @@ const memberView = (member: AttendanceMember) => ({
 
 const sessionStatus = (session: AttendanceSession, now = new Date()) =>
     session.sentAt ? 'sent' : session.closesAt && session.closesAt <= now ? 'closed' : 'open';
-const sessionView = (session: SessionWithMembers) => {
+const sessionView = (session: SessionWithMembers, profiles?: ReadonlyMap<string, MemberProfile>) => {
     const now = new Date();
     const status = sessionStatus(session, now);
     const closedAt = status === 'open' ? null : session.closesAt?.toISOString() ?? null;
@@ -64,6 +95,7 @@ const sessionView = (session: SessionWithMembers) => {
         lecturerCardHex: '',
         doorId: session.readerId,
         exitReaderId: session.exitReaderId,
+        readerGroup: isReaderGroupScope(session.roomKey),
         openedAt: session.openedAt.toISOString(),
         closedAt,
         from: session.openedAt.toISOString(),
@@ -72,7 +104,7 @@ const sessionView = (session: SessionWithMembers) => {
         totalScans: session.members.reduce((total, member) => total + member.count, 0),
         totalPresent: session.members.length,
         truncated: false,
-        students: session.members.map(memberView),
+        students: session.members.map((member) => memberView(member, profiles?.get(profileLogin(member)))),
     };
 };
 const members = {
@@ -156,7 +188,7 @@ router.get('/list', handle(async (req, res) => {
     });
     if (!results.length) throw new RequestError(404, 'Attendance session not found');
     if (results.length > 1) throw new RequestError(409, 'Specify the occurrence start time');
-    res.json(sessionView(results[0]));
+    res.json(sessionView(results[0], await memberProfiles(results[0].members)));
 }));
 
 router.get('/pending', handle(async (req, res) => {
@@ -193,7 +225,9 @@ router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę 
     await editSession(req, async (tx, session) => {
         const now = new Date();
         if (session.closesAt && session.closesAt <= now) return;
-        if (session.exitReaderId) throw new RequestError(409, 'Close the list with the configured exit reader');
+        if (session.exitReaderId || isReaderGroupScope(session.roomKey)) {
+            throw new RequestError(409, 'Close the list with the configured exit reader');
+        }
         await tx.attendanceSession.update({
             where: { id: session.id }, data: { manualClosedAt: now },
         });
@@ -203,7 +237,7 @@ router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę 
         where: { ...owner(req), id: idSchema.parse(req.params.id) }, include: members,
     });
     if (!session) throw new RequestError(404, 'Attendance session not found');
-    res.json(sessionView(session));
+    res.json(sessionView(session, await memberProfiles(session.members)));
 }));
 
 router.post('/sessions/:id/send', auditAction('ATTENDANCE', 'Przygotowano listę obecności do wysyłki'), handle(async (req, res) => {
@@ -213,14 +247,15 @@ router.post('/sessions/:id/send', auditAction('ATTENDANCE', 'Przygotowano listę
             where: { id: session.id }, data: { sentAt: session.sentAt ?? new Date() }, include: members,
         });
     });
-    res.json(sessionView(updated));
+    res.json(sessionView(updated, await memberProfiles(updated.members)));
 }));
 
 router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do listy obecności'), handle(async (req, res) => {
     const payload = memberBody.parse(req.body);
     const result = await editSession(req, async (tx, session) => {
         if (sessionStatus(session) !== 'open') throw new RequestError(409, 'Attendance session is closed');
-        const login = payload.username.toLowerCase();
+        const username = payload.username.toLowerCase();
+        const login = /^\d+$/.test(username) ? 's' + username : username;
         let at = new Date();
         if (payload.entered_at) {
             const lessonDate = DateTime.fromJSDate(session.lessonStart, { zone: CAMPUS_ZONE });
@@ -230,7 +265,7 @@ router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do l
         if (at < session.openedAt || (session.closesAt && at >= session.closesAt)) {
             throw new RequestError(400, 'Attendance time must be within the session');
         }
-        const album = /^\d+$/.test(login) ? login : null;
+        const album = /^s?(\d+)$/.exec(login)?.[1] ?? null;
         const data = { name: payload.username, album, firstAt: at, lastAt: at, count: 1, manual: true, removed: false };
         return tx.attendanceMember.upsert({
             where: { sessionId_login: { sessionId: session.id, login } },
@@ -238,7 +273,7 @@ router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do l
             update: data,
         });
     });
-    res.status(201).json({ user: memberView(result) });
+    res.status(201).json({ user: memberView(result, (await memberProfiles([result])).get(profileLogin(result))) });
 }));
 
 router.delete('/sessions/:id/users/:userId', auditAction('ATTENDANCE', 'Usunięto osobę z listy obecności'), handle(async (req, res) => {

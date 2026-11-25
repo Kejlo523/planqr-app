@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { KantechNavigation } from "./KantechNavigation";
 import { KantechInventory } from "./KantechInventory";
+import { KantechReaderGroups } from "./KantechReaderGroups";
 import "./KantechReaders.css";
 
 type Direction = "ENTRY" | "EXIT";
 type Reader = {
   id: string; label: string; buildingId: string; roomNumber: string;
   direction: Direction | null; pairedReaderId: string | null; singleReader: boolean;
+  groupId: number | null;
 };
 type Registry = { readers: Reader[]; devTools: boolean };
 const emptyEndpoint = { id: "", label: "" };
@@ -144,6 +146,7 @@ export default function KantechReaders() {
 
   const readersById = new Map(registry?.readers.map((reader) => [reader.id, reader]));
   const configurations = registry?.readers.flatMap((reader) => {
+    if (reader.groupId) return [];
     const partner = reader.pairedReaderId ? readersById.get(reader.pairedReaderId) : undefined;
     if (reader.direction === "EXIT" && partner?.direction === "ENTRY") return [];
     return [{ reader, exit: reader.direction === "ENTRY" && partner?.direction === "EXIT" ? partner : undefined }];
@@ -174,6 +177,7 @@ export default function KantechReaders() {
         ) : <p role="status">Ładowanie czytników…</p> : (
           <div className="kantech-readers-layout">
             <div className="kantech-readers-main">
+              <KantechReaderGroups onRegistryChange={() => setReload((current) => current + 1)} />
               {editor && (
                 <section className="kantech-readers-panel" aria-labelledby="kantech-reader-form">
                   <div className="kantech-readers-panel__heading">
@@ -227,7 +231,7 @@ export default function KantechReaders() {
                 </section>
               )}
               <section className="kantech-readers-panel" aria-labelledby="kantech-reader-list">
-                <div className="kantech-readers-panel__heading"><h2 id="kantech-reader-list">Zapisane czytniki</h2></div>
+                <div className="kantech-readers-panel__heading"><h2 id="kantech-reader-list">Czytniki poza grupami</h2></div>
                 {configurations.length ? <ul className="kantech-reader-list" aria-labelledby="kantech-reader-list">
                   {configurations.map(({ reader, exit }) => (
                     <li className="kantech-reader-row" key={reader.id}>
@@ -262,7 +266,7 @@ export default function KantechReaders() {
                       </div>}
                     </li>
                   ))}
-                </ul> : <p className="kantech-reader-list__empty">Dodaj pierwszy czytnik, aby przypisać go do sali.</p>}
+                </ul> : <p className="kantech-reader-list__empty">Brak czytników poza grupami.</p>}
               </section>
             </div>
             <KantechInventory editorOpen={Boolean(editor)} />

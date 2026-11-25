@@ -85,6 +85,44 @@
 .kantech-readers-form input[readonly] { color: var(--admin-text-muted); }
 .kantech-readers-form__footer { justify-content: flex-end; padding-top: .7rem; border-top: 1px solid var(--admin-border); }
 
+.kantech-rcp-help { margin: .75rem var(--reader-panel-space); }
+.kantech-rcp-form {
+  display: grid;
+  gap: .8rem;
+  padding: var(--reader-panel-space);
+  border-block: 1px solid var(--admin-border);
+}
+.kantech-rcp-form h3 { margin: 0; }
+.kantech-rcp-field { display: grid; gap: .35rem; min-width: 0; }
+.kantech-rcp-picker { display: flex; align-items: end; flex-wrap: wrap; gap: .6rem; }
+.kantech-rcp-picker label { flex: 1 1 14rem; }
+.kantech-rcp-form input,
+.kantech-rcp-form select {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: .45rem .6rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  color: inherit;
+  background: var(--pq-nav);
+  font: inherit;
+}
+.kantech-rcp-device {
+  display: grid;
+  gap: .65rem;
+  min-width: 0;
+  margin: 0;
+  padding: .65rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+}
+.kantech-rcp-device legend { padding-inline: .25rem; color: var(--admin-accent-text); font-weight: 600; }
+.kantech-rcp-device button { justify-self: start; }
+.kantech-rcp-reader { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, 28%); gap: .65rem; align-items: center; }
+.kantech-rcp-reader > span { overflow-wrap: anywhere; }
+.kantech-rcp-summary { display: flex; flex-wrap: wrap; gap: .3rem .8rem; margin-top: .6rem; font-size: .87rem; }
+.kantech-rcp-summary > span { color: var(--admin-text-muted); }
+
 .kantech-inventory__meta { margin: .7rem var(--reader-panel-space); color: var(--admin-text-muted); font-size: .82rem; }
 .kantech-inventory__list {
   max-height: 23rem;
@@ -125,6 +163,7 @@
 }
 
 @container kantech-readers (max-width: 31rem) {
+  .kantech-rcp-reader { grid-template-columns: minmax(0, 1fr); gap: .3rem; }
   .kantech-readers__endpoints,
   .kantech-readers__endpoints[data-single="true"] .kantech-readers__endpoint { grid-template-columns: minmax(0, 1fr); }
   .kantech-reader-row__header .admin-button,

@@ -169,13 +169,16 @@ async function browserSmoke(api, simulator, password, directory) {
         const content = await readFile(await download.path());
         assert.equal(content.subarray(0, 2).toString(), 'PK');
         assert.ok(content.includes(Buffer.from('xl/worksheets/sheet1.xml')));
-        assert.ok(content.includes(Buffer.from('guest-test')));
+        for (const value of ['Stan', 'Lista zamknięta', 'Lp.', 'Imię', 'Nazwisko', 'Numer albumu', 'Godzina odbicia', 'Łucja', 'Żak', '123456']) {
+            assert.ok(content.includes(Buffer.from(value)), value);
+        }
+        assert.ok(!content.includes(Buffer.from('guest-test')));
         await page.goto(url + '/attendance/9003');
         await page.getByText('Lista otwarta', { exact: true }).waitFor();
         const inProgressFile = page.waitForEvent('download');
         await page.getByRole('button', { name: 'Pobierz XLSX' }).click();
         const inProgressContents = await readFile(await (await inProgressFile).path());
-        assert.ok(inProgressContents.includes(Buffer.from('Fixture 9003')));
+        assert.ok(inProgressContents.includes(Buffer.from('Lista otwarta')));
         await page.goto(url + '/adminpanel/kantech?=dev');
         await page.getByRole('heading', { name: 'Testy Kantecha' }).waitFor();
         await page.getByLabel('Alias z czytnika').fill('wi_sync77');
@@ -237,6 +240,14 @@ async function browserSmoke(api, simulator, password, directory) {
         await inventoryDoor('49888').getByText('Offline', { exact: true }).waitFor();
         await inventoryDoor('49889').getByText('Wyłączony', { exact: true }).waitFor();
         await inventoryDoor('49890').getByText('Brak stanu', { exact: true }).waitFor();
+        const rcpGroups = page.getByRole('region', { name: 'Grupy urządzeń RCP' });
+        await rcpGroups.getByRole('button', { name: 'Dodaj grupę' }).click();
+        await rcpGroups.getByLabel('Nazwa grupy').fill('Konfiguracja testowa');
+        await rcpGroups.getByLabel('Urządzenie ze SmartService').selectOption('RCP-04@01.04');
+        await rcpGroups.getByRole('button', { name: 'Dodaj urządzenie' }).click();
+        assert.equal(await rcpGroups.getByLabel('Rola czytnika 49701').inputValue(), 'ENTRY');
+        assert.equal(await rcpGroups.getByLabel('Rola czytnika 49702').inputValue(), 'EXIT');
+        await rcpGroups.getByRole('button', { name: 'Anuluj' }).click();
         await page.setViewportSize({ width: 1440, height: 900 });
         const addReaders = page.getByRole('button', { name: 'Dodaj czytniki', exact: true });
         const readerForm = page.getByRole('region', { name: 'Dodaj czytniki' });
@@ -255,7 +266,7 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
         await page.getByText('Zapisano parę 49998 → 49997.').waitFor();
         await readerForm.waitFor({ state: 'hidden' });
-        const pair = page.getByRole('list', { name: 'Zapisane czytniki' }).getByRole('listitem')
+        const pair = page.getByRole('list', { name: 'Czytniki poza grupami' }).getByRole('listitem')
             .filter({ hasText: '49998' });
         await pair.getByText('→', { exact: true }).waitFor();
         assert.match(await pair.textContent(), /Wejście.*49998.*→.*Wyjście.*49997/);
@@ -352,6 +363,8 @@ async function main() {
         try {
             await seeded.query('INSERT INTO admins (id, username, "updatedAt") VALUES ($1, $2, NOW())',
                 ['fixture-admin', 'pilot-admin']);
+            await seeded.query(`INSERT INTO ldap_users (username, display_name, given_name, surname, title)
+                VALUES ($1, $2, $3, $4, 'student')`, ['s123456', 'Żak Łucja', 'Łucja', 'Żak']);
         } finally {
             await seeded.end();
         }
@@ -494,7 +507,7 @@ async function main() {
             _building_id: 'TEST', _room_number: roomNumber, start: at(start), end: at(end),
         });
         assert.ok((await request(simulator + '/test/schedule', {
-            json: [event(9000, -10_800, -10_000), event(9001, -600, 1_800), event(9002, 300, 2_400, '202'),
+            json: [event(9000, -10_800, -8_100), event(9001, -600, 2_100), event(9002, 300, 2_400, '202'),
                 event(9003, 600, 2_700, '202')],
         })).ok);
         await request(simulator + '/test/availability', { json: { schedule: false } });
@@ -534,8 +547,8 @@ async function main() {
         await emit('WISYNC_1', at(-120));
         await emit('WISYNC_1', at(-110), '49922');
         await emit('WISYNC_2', at(-100), '49921');
-        await waitFor('wrong exit and student exit leave the list open', async () => (await live()).events.some(
-            (item) => item.readerId === '49921' && item.label === 'WISYNC_2' && item.outcome === 'exit_ignored'));
+        await waitFor('repeated student tap on the exit does not duplicate attendance', async () => (await live()).events.some(
+            (item) => item.readerId === '49921' && item.label === 'WISYNC_2' && item.outcome === 'repeat_tap'));
         assert.equal((await (await list(9001)).json()).status, 'open');
         await emit('WISYNC_1', at(-90), '49921');
         await waitFor('late closing tap corrects membership', async () => {
@@ -796,6 +809,69 @@ async function main() {
         assert.equal(singleClosed.students[0].albumNumber, '054321');
         console.log('Atomic reader setup and single-reader closing threshold passed.');
 
+        const groupsUrl = readersApi + '/groups';
+        assert.equal((await request(groupsUrl)).status, 401);
+        assert.equal((await request(groupsUrl, { headers: lecturer })).status, 403);
+        const groupSnapshot = await (await request(groupsUrl, { headers })).json();
+        const devices = groupSnapshot.devices.map(({ id, readers }) => ({
+            id, readers: readers.map(({ id, label }) => ({ id, role: /Exit$/.test(label) ? 'EXIT' : 'ENTRY' })),
+        }));
+        assert.deepEqual(devices.map(({ id }) => id), ['RCP-04@01.04', 'RCP-05@01.05']);
+        const nameOfGroup = 'Sala testowa RCP';
+        const group = await request(groupsUrl, { headers, json: { name: nameOfGroup, devices: devices.slice(0, 1) } });
+        assert.equal(group.status, 201);
+        const { id: groupId } = await group.json();
+        assert.equal((await request(groupsUrl, { headers, json: { id: groupId, name: nameOfGroup, devices } })).status, 200);
+        assert.equal((await request(groupsUrl, { headers, json: { name: 'Duplikat', devices: devices.slice(1) } })).status, 409);
+        assert.equal((await request(readersApi + '/49701', { method: 'DELETE', headers })).status, 409);
+
+        assert.ok((await request(simulator + '/test/schedule', { json: [event(9450, -650, 2_100)] })).ok);
+        await emit('WISYNC_1', at(-500), '49701');
+        await emit('s123456', at(-490), '49702');
+        await emit('WISYNC_2', at(-485), '49703');
+        await emit('WISYNC_4', at(-480), '49704');
+        const groupList = await waitFor('two RCP units share a list and a lecturer can join through an exit', async () => {
+            const response = await list(9450);
+            if (!response.ok) return;
+            const value = await response.json();
+            return value.totalPresent === 2 && value;
+        });
+        assert.equal(groupList.readerGroup, true);
+        assert.equal(groupList.status, 'open');
+        assert.equal(groupList.doorId, '49701');
+        assert.deepEqual(groupList.students.map(({ username, givenName, surname, albumNumber }) =>
+            [username, givenName, surname, albumNumber]), [['s123456', 'Łucja', 'Żak', '123456'], ['lecturer-two', 'Testowy', 'Drugi', '']]);
+        assert.equal((await request(groupsUrl + '/' + groupId, { method: 'DELETE', headers })).status, 409);
+        assert.equal((await request(api + '/api/attendance/sessions/' + groupList.sessionId + '/close', { headers, json: {} })).status, 409);
+        await emit('WISYNC_1', at(-460), '49703');
+        await emit('WISYNC_1', at(-450), '49704');
+        const groupClosed = await waitFor('opening lecturer closes at the other RCP exit', async () => {
+            const value = await (await list(9450)).json();
+            return value.status === 'closed' && value;
+        });
+        assert.equal(groupClosed.closedAt, at(-450));
+        assert.equal(groupClosed.totalPresent, 2);
+
+        assert.ok((await request(simulator + '/test/schedule', { json: [event(9451, -360, 1_690)] })).ok);
+        await emit('WISYNC_1', at(-350), '49703');
+        await emit('s123456', at(-111), '49704');
+        await emit('s22222', at(-110), '49701');
+        await emit('WISYNC_1', at(-95), '49701');
+        const expired = await waitFor('attendance stops at the automatic deadline', async () => {
+            const response = await list(9451);
+            if (!response.ok) return;
+            const value = await response.json();
+            return value.status === 'closed' && value.totalPresent === 1 && value;
+        });
+        assert.equal(expired.closedAt, at(-110));
+        assert.deepEqual(expired.students.map(({ username }) => username), ['s123456']);
+        assert.ok((await live()).events.some(({ label, outcome }) => label === 's22222' && outcome === 'no_session'));
+        assert.equal((await request(groupsUrl + '/' + groupId, { method: 'DELETE', headers })).status, 204);
+        for (const { readers } of devices) {
+            for (const { id } of readers) assert.equal((await request(readersApi + '/' + id, { method: 'DELETE', headers })).status, 204);
+        }
+        console.log('RCP discovery and configuration, shared attendance, LDAP names, owner-only close and automatic deadline passed.');
+
         await stop(server);
         server = startBackend('observe');
         headers = await authenticate();
@@ -821,7 +897,7 @@ async function main() {
             buildingId: 'W1', roomNumber: '129', edit: true,
         } })).status, 200);
         const fixtureRoom = {
-            ...event(9400, -300, 1_800, '129'), start: aroundSwitch(-60_000), end: aroundSwitch(1_800_000),
+            ...event(9400, -300, 3_600, '129'), start: aroundSwitch(-60_000), end: aroundSwitch(3_600_000),
             _building_id: 'WI_WI2', _room_number: '306', room: 'WI WI2- 306',
         };
         assert.ok((await request(simulator + '/test/schedule', {

@@ -60,7 +60,7 @@ export async function listReaders() {
 
 const readerFields = {
     id: true, label: true, buildingId: true, roomNumber: true, direction: true,
-    singleReader: true, exitReaderId: true, entryReader: { select: { id: true } },
+    singleReader: true, exitReaderId: true, entryReader: { select: { id: true } }, groupId: true,
 } satisfies Prisma.AttendanceReaderSelect;
 
 const readerView = ({ exitReaderId, entryReader, ...reader }:
@@ -70,11 +70,15 @@ const readerView = ({ exitReaderId, entryReader, ...reader }:
 
 export class ReaderConfigurationError extends Error {}
 
-async function requireIdleReaders(tx: Prisma.TransactionClient, ids: string[]) {
+export async function requireIdleReaders(tx: Prisma.TransactionClient, ids: string[], groupId?: number) {
     const session = await tx.attendanceSession.findFirst({
         where: {
-            closesAt: null, voided: false,
-            OR: [{ readerId: { in: ids } }, { exitReaderId: { in: ids } }],
+            voided: false,
+            AND: [
+                { OR: [{ closesAt: null }, { closesAt: { gt: new Date() } }] },
+                { OR: [{ readerId: { in: ids } }, { exitReaderId: { in: ids } },
+                    ...(groupId === undefined ? [] : [{ roomKey: `group:${groupId}` }])] },
+            ],
         }, select: { id: true },
     });
     if (session) throw new ReaderConfigurationError('Najpierw zamknij aktywną listę obecności na czytniku wyjściowym.');
@@ -93,6 +97,9 @@ export async function saveReader(input: z.infer<typeof readerInput>) {
         const peer = nextPeer ? await tx.attendanceReader.findUnique({
             where: { id: nextPeer }, select: readerFields,
         }) : null;
+        if (current?.groupId || peer?.groupId) {
+            throw new ReaderConfigurationError('Zmień konfigurację w grupie urządzeń RCP.');
+        }
         if ((current?.singleReader && (nextPeer || nextDirection !== 'ENTRY')) || peer?.singleReader) {
             throw new ReaderConfigurationError('Czytnik działający w obie strony zmień w konfiguracji wejścia i wyjścia.');
         }
@@ -131,6 +138,9 @@ export async function saveReaderSetup({ entry, exit, buildingId, roomNumber, edi
         });
         const currentEntry = existing.find(({ id }) => id === entry.id);
         const currentExit = existing.find(({ id }) => id === exit?.id);
+        if (existing.some(({ groupId }) => groupId !== null)) {
+            throw new ReaderConfigurationError('Zmień konfigurację w grupie urządzeń RCP.');
+        }
         if (!edit && existing.length) {
             throw new ReaderConfigurationError('To ID jest już zapisane. Wybierz Edytuj przy istniejącym czytniku.');
         }
@@ -166,6 +176,9 @@ export async function deleteReader(id: string) {
     await ensureReaderSetup();
     await attendanceDb.$transaction(async (tx) => {
         await lockReaderConfiguration(tx);
+        if (await tx.attendanceReader.findFirst({ where: { id, groupId: { not: null } } })) {
+            throw new ReaderConfigurationError('Usuń urządzenie z grupy RCP.');
+        }
         await requireIdleReaders(tx, [id]);
         await tx.attendanceReader.deleteMany({ where: { id } });
     });

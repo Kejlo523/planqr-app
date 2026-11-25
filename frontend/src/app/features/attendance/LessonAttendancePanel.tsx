@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { FaDownload, FaFileExport, FaPlus, FaSyncAlt, FaTimes, FaTrash } from "react-icons/fa";
 import "../Registry/AdminRegistry.css";
-import type {
-  AttendanceDraft,
-  AttendanceDraftStatus,
-} from "./attendanceDrafts";
+import { attendanceStatusLabel, type AttendanceDraft } from "./attendanceDrafts";
 import { downloadAttendanceXlsx } from "./attendanceExport";
 import AttendanceChoices from "./AttendanceChoices";
 import "./LessonAttendancePanel.css";
@@ -24,20 +21,6 @@ interface LessonAttendancePanelProps {
   onRemoveRow?: (rowId: string, userId?: number) => void;
   onClosePanel?: () => void;
 }
-
-const getDraftStatusLabel = (status: AttendanceDraftStatus) => {
-  switch (status) {
-    case "open":
-      return "Lista otwarta";
-    case "closed":
-      return "Lista zamknięta";
-    case "sent":
-      return "Lista wysłana";
-    case "idle":
-    default:
-      return "Gotowa do otwarcia";
-  }
-};
 
 const formatSentAt = (value?: string | null) => {
   if (!value) {
@@ -104,7 +87,8 @@ export default function LessonAttendancePanel({
 
   const isOpen = draft.status === "open";
   const canCheckScan = draft.status === "idle";
-  const canClose = draft.status === "open" && !draft.exitReaderId;
+  const readerClosesList = draft.readerGroup || Boolean(draft.exitReaderId);
+  const canClose = draft.status === "open" && !readerClosesList;
   const canSend = draft.status === "closed";
   const hasSession = Boolean(draft.sessionId);
   const addDisabled = !isOpen || !hasSession || albumInput.trim().length === 0;
@@ -117,7 +101,7 @@ export default function LessonAttendancePanel({
 
         <div className="lesson-attendance__header-actions">
           <div className="lesson-attendance__status">
-            <strong>{getDraftStatusLabel(draft.status)}</strong>
+            <strong>{attendanceStatusLabel[draft.status]}</strong>
           </div>
 
           {onRefresh ? (
@@ -151,7 +135,8 @@ export default function LessonAttendancePanel({
       {hasSession && (
         <div className="lesson-attendance__feedback">
           {[draft.title, draft.room, draft.group && `Grupa ${draft.group}`].filter(Boolean).join(" · ")}
-          {draft.exitReaderId && (
+          {draft.readerGroup && <div>Prowadzący zamyka listę na wyjściu z grupy czytników.</div>}
+          {!draft.readerGroup && draft.exitReaderId && (
             <div>{draft.doorId === draft.exitReaderId
               ? `Czytnik ${draft.doorId} · wejście i wyjście. Zamknięcie po minucie od otwarcia.`
               : `Czytniki ${draft.doorId} → ${draft.exitReaderId}`}</div>
@@ -212,11 +197,11 @@ export default function LessonAttendancePanel({
             {draft.rows.map((row) => (
               <li key={row.id} className="lesson-attendance__line">
                 <div className="lesson-attendance__line-main">
-                  <strong>{row.displayName || row.albumNumber}</strong>
+                  <strong>{row.username || row.albumNumber || row.displayName}</strong>
                   {row.displayName && row.username && row.displayName !== row.username ? (
                     <>
                       <span className="lesson-attendance__separator">/</span>
-                      <span>{row.username}</span>
+                      <span>{[row.givenName, row.surname].filter(Boolean).join(" ") || row.displayName}</span>
                     </>
                   ) : null}
                   <span className="lesson-attendance__separator">—</span>
@@ -273,7 +258,7 @@ export default function LessonAttendancePanel({
           >
             Sprawdź odbicie
           </button>}
-          {!readOnly && !draft.exitReaderId && <button
+          {!readOnly && !readerClosesList && <button
             type="button"
             className="admin-button admin-button--ghost admin-button--small"
             disabled={!canClose || !hasSession}

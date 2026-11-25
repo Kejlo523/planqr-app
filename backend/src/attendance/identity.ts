@@ -7,8 +7,10 @@ const lecturerLogin = /^[a-z][a-z-]{2,}$/;
 export function attendanceIdentity(alias: string, card?: AttendanceCard, profile?: LdapUser | null) {
     if (card) {
         const isLecturer = Boolean(card.scheduleId);
-        const album = card.album ?? (isLecturer ? null : studentLogin.exec(normalizeCardLogin(card.login))?.[1] ?? null);
-        return { ...card, album, isLecturer };
+        const mappedLogin = normalizeCardLogin(card.login);
+        const login = !isLecturer && /^\d+$/.test(mappedLogin) ? 's' + mappedLogin : mappedLogin;
+        const album = card.album ?? (isLecturer ? null : studentLogin.exec(login)?.[1] ?? null);
+        return { ...card, login, album, isLecturer };
     }
     const login = normalizeCardLogin(alias);
     if (profile?.isActive === 0) return null;

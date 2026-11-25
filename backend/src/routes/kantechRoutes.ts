@@ -7,6 +7,7 @@ import { getMonitor, incomingReport } from '../attendance/monitor';
 import { captureSettingsInput, readCaptureSettings, updateCaptureSettings } from '../attendance/captureSettings';
 import { saveReaderReport } from '../attendance/reports';
 import { inventoryReaders, saveInventory } from '../attendance/inventory';
+import { deleteReaderGroup, listReaderGroups, readerGroupInput, saveReaderGroup } from '../attendance/readerGroups';
 import { attendanceDb } from '../attendance/store';
 import {
     deleteReader, listReaders, ReaderConfigurationError, readerIdSchema, readerInput, readerSetupInput, saveReader, saveReaderSetup,
@@ -174,6 +175,36 @@ kantechReaders.get('/inventory', async (_req, res) => {
         res.json(snapshot ?? { readers: [], checkedAt: null });
     } catch {
         res.sendStatus(503);
+    }
+});
+
+kantechReaders.get('/groups', async (_req, res) => {
+    try {
+        res.json(await listReaderGroups());
+    } catch {
+        res.status(503).json({ message: 'Nie udało się pobrać grup i urządzeń RCP.' });
+    }
+});
+
+kantechReaders.post('/groups', auditAction('KANTECH', 'Zapisano grupę urządzeń RCP', (req) => req.body?.name), async (req, res) => {
+    try {
+        const input = readerGroupInput.parse(req.body);
+        res.status(input.id ? 200 : 201).json(await saveReaderGroup(input));
+    } catch (error) {
+        if (error instanceof z.ZodError) res.status(400).json({ message: 'Sprawdź nazwę, urządzenia i role czytników.' });
+        else if (error instanceof ReaderConfigurationError) res.status(409).json({ message: error.message });
+        else res.status(503).json({ message: 'Nie udało się zapisać grupy RCP.' });
+    }
+});
+
+kantechReaders.delete('/groups/:id', auditAction('KANTECH', 'Usunięto grupę urządzeń RCP'), async (req, res) => {
+    try {
+        await deleteReaderGroup(req.params.id);
+        res.sendStatus(204);
+    } catch (error) {
+        if (error instanceof z.ZodError) res.status(400).json({ message: 'Nieprawidłowe ID grupy.' });
+        else if (error instanceof ReaderConfigurationError) res.status(409).json({ message: error.message });
+        else res.status(503).json({ message: 'Nie udało się usunąć grupy RCP.' });
     }
 });
 

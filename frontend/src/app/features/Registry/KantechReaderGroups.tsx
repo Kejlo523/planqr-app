@@ -1,0 +1,185 @@
+import { useEffect, useState, type FormEvent } from "react";
+
+type Role = "ENTRY" | "EXIT" | "BOTH";
+type Reader = { id: string; label: string | null };
+type Device = { id: string; name: string; readers: Reader[] };
+type GroupReader = Reader & { role: Role };
+type Group = { id: number; name: string; devices: { id: string; readers: GroupReader[] }[] };
+type Snapshot = { groups: Group[]; devices: Device[] };
+type Draft = Omit<Group, "id"> & { id?: number };
+
+const api = "/api/kantech/readers/groups";
+const roles: Record<Role, string> = { ENTRY: "Wejście", EXIT: "Wyjście", BOTH: "Wejście i wyjście" };
+const deviceName = (id: string) => id.replace("@", " · ");
+
+async function request(url: string, options?: RequestInit) {
+  const response = await fetch(url, { cache: "no-store", credentials: "include", ...options });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message || "Nie udało się wykonać operacji na grupach RCP.");
+  }
+  return response;
+}
+
+export function KantechReaderGroups({ onRegistryChange }: { onRegistryChange: () => void }) {
+  const [snapshot, setSnapshot] = useState<Snapshot>();
+  const [draft, setDraft] = useState<Draft>();
+  const [selected, setSelected] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void request(api, { signal: controller.signal })
+      .then((response) => response.json())
+      .then((data: Snapshot) => { if (!controller.signal.aborted) setSnapshot(data); })
+      .catch((cause: Error) => { if (!controller.signal.aborted) setError(cause.message); });
+    return () => controller.abort();
+  }, [reload]);
+
+  const available = snapshot?.devices.filter((device) =>
+    !draft?.devices.some(({ id }) => id === device.id) &&
+    !snapshot.groups.some((group) => group.id !== draft?.id && group.devices.some(({ id }) => id === device.id)),
+  ) ?? [];
+  const addReader = (reader: Reader): GroupReader => ({
+    ...reader,
+    role: /\b(?:exit|wyjście)\s*$/iu.test(reader.label ?? "") ? "EXIT" : "ENTRY",
+  });
+  const edit = (group?: Group) => {
+    setError("");
+    setSelected("");
+    setDraft(group ? {
+      ...group,
+      devices: group.devices.map((device) => ({
+        ...device,
+        readers: [
+          ...device.readers,
+          ...snapshot?.devices.find(({ id }) => id === device.id)?.readers
+            .filter((reader) => !device.readers.some(({ id }) => id === reader.id)).map(addReader) ?? [],
+        ],
+      })),
+    } : { name: "", devices: [] });
+  };
+  const addDevice = () => {
+    const device = available.find(({ id }) => id === selected);
+    if (!device || !draft) return;
+    const readers = device.readers.map(addReader);
+    if (readers.length === 1 && readers[0].role === "ENTRY") readers[0].role = "BOTH";
+    setDraft({ ...draft, devices: [...draft.devices, { id: device.id, readers }] });
+    setSelected("");
+  };
+
+  const mutate = async (url: string, options: RequestInit) => {
+    setBusy(true);
+    setError("");
+    try {
+      await request(url, options);
+      setDraft(undefined);
+      setReload((value) => value + 1);
+      onRegistryChange();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Nie udało się zmienić grupy.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    if (draft) void mutate(api, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+  };
+
+  return (
+    <section className="kantech-readers-panel" aria-labelledby="kantech-group-heading">
+      <div className="kantech-readers-panel__heading">
+        <h2 id="kantech-group-heading">Grupy urządzeń RCP</h2>
+        {!draft && <button type="button" className="admin-button admin-button--primary admin-button--small"
+          disabled={!snapshot || busy} onClick={() => edit()}>Dodaj grupę</button>}
+      </div>
+      <p className="kantech-readers__details kantech-rcp-help">Urządzenia w jednej grupie obsługują wspólną listę obecności.</p>
+      {error && <p role="alert" className="kantech-monitor__error">{error}</p>}
+      {draft && (
+        <form className="kantech-rcp-form" onSubmit={save}>
+          <h3>{draft.id ? "Edytuj grupę RCP" : "Nowa grupa RCP"}</h3>
+          <label className="kantech-rcp-field">
+            Nazwa grupy
+            <input required maxLength={128} value={draft.name}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+          </label>
+          <div className="kantech-rcp-picker">
+            <label className="kantech-rcp-field">
+              Urządzenie ze SmartService
+              <select value={selected} onChange={(event) => setSelected(event.target.value)}>
+                <option value="">{available.length ? "Wybierz urządzenie RCP" : "Brak wolnych urządzeń RCP"}</option>
+                {available.map(({ id }) => <option key={id} value={id}>{deviceName(id)}</option>)}
+              </select>
+            </label>
+            <button type="button" className="admin-button admin-button--secondary" disabled={!selected || busy}
+              onClick={addDevice}>Dodaj urządzenie</button>
+            <button type="button" className="admin-button admin-button--ghost" disabled={busy}
+              onClick={() => { setError(""); setReload((value) => value + 1); }}>Odśwież spis</button>
+          </div>
+          {draft.devices.map((device) => (
+            <fieldset className="kantech-rcp-device" key={device.id}>
+              <legend>{deviceName(device.id)}</legend>
+              {device.readers.map((reader) => (
+                <label className="kantech-rcp-reader" key={reader.id}>
+                  <span><strong>{reader.id}</strong> {reader.label}</span>
+                  <select aria-label={`Rola czytnika ${reader.id}`} value={reader.role} onChange={(event) => {
+                    const role = event.target.value as Role;
+                    setDraft({ ...draft, devices: draft.devices.map((item) => item.id === device.id ? {
+                      ...item, readers: item.readers.map((entry) => entry.id === reader.id ? { ...entry, role } : entry),
+                    } : item) });
+                  }}>
+                    {Object.entries(roles).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+                  </select>
+                </label>
+              ))}
+              <button type="button" className="admin-button admin-button--ghost admin-button--small" disabled={busy}
+                onClick={() => setDraft({ ...draft, devices: draft.devices.filter(({ id }) => id !== device.id) })}>
+                Usuń urządzenie z grupy
+              </button>
+            </fieldset>
+          ))}
+          <div className="kantech-readers__actions">
+            <button className="admin-button admin-button--primary" type="submit"
+              disabled={busy || !draft.name.trim() || !draft.devices.length}>Zapisz grupę</button>
+            <button className="admin-button admin-button--ghost" type="button" disabled={busy}
+              onClick={() => { setDraft(undefined); setError(""); }}>Anuluj</button>
+          </div>
+        </form>
+      )}
+      {!snapshot && !error && <p role="status">Ładowanie grup…</p>}
+      {!snapshot && error && <button type="button" className="admin-button admin-button--secondary"
+        onClick={() => { setError(""); setReload((value) => value + 1); }}>Ponów</button>}
+      {snapshot && !snapshot.groups.length && !draft && <p className="kantech-reader-list__empty">Brak zapisanych grup RCP.</p>}
+      {!!snapshot?.groups.length && <ul className="kantech-reader-list">
+        {snapshot.groups.map((group) => (
+          <li className="kantech-reader-row" key={group.id}>
+            <div className="kantech-reader-row__header">
+              <strong>{group.name}</strong>
+              <div className="kantech-readers__actions">
+                <button className="admin-button admin-button--secondary admin-button--small" type="button" disabled={busy}
+                  onClick={() => edit(group)}>Edytuj grupę</button>
+                <button className="admin-button admin-button--ghost admin-button--small" type="button" disabled={busy}
+                  onClick={() => {
+                    if (window.confirm(`Usunąć grupę „${group.name}”?`)) void mutate(api + "/" + group.id, { method: "DELETE" });
+                  }}>Usuń grupę</button>
+              </div>
+            </div>
+            {group.devices.map((device) => <div className="kantech-rcp-summary" key={device.id}>
+              <strong>{deviceName(device.id)}</strong>
+              {device.readers.map((reader) => <span key={reader.id}>
+                <span aria-hidden="true">{reader.role === "ENTRY" ? "→" : reader.role === "EXIT" ? "←" : "↔"} </span>
+                {roles[reader.role]} <span className="kantech-monitor__mono">{reader.id}</span>
+              </span>)}
+            </div>)}
+          </li>
+        ))}
+      </ul>}
+    </section>
+  );
+}

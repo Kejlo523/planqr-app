@@ -8,12 +8,21 @@ import type {
 export type AttendanceSource = "scanner" | "manual";
 export type AttendanceDraftStatus = "idle" | "open" | "closed" | "sent";
 
+export const attendanceStatusLabel: Record<AttendanceDraftStatus, string> = {
+  open: "Lista otwarta",
+  closed: "Lista zamknięta",
+  sent: "Lista wysłana",
+  idle: "Gotowa do otwarcia",
+};
+
 export interface AttendanceRow {
   id: string;
   userId?: number;
   albumNumber: string;
   username?: string;
   displayName?: string;
+  givenName?: string | null;
+  surname?: string | null;
   cardHex?: string;
   enteredAt: string | null;
   source: AttendanceSource;
@@ -32,6 +41,7 @@ export interface AttendanceDraft {
   room?: string;
   group?: string | null;
   exitReaderId?: string | null;
+  readerGroup?: boolean;
   rows: AttendanceRow[];
   sentAt?: string | null;
   loadedAt?: string | null;
@@ -116,6 +126,8 @@ export const createScannerAttendanceRows = (
     albumNumber: student.albumNumber,
     username: student.username,
     displayName: student.displayName,
+    givenName: student.givenName,
+    surname: student.surname,
     cardHex: student.cardHex,
     enteredAt: student.enteredAt,
     source: resolveRowSource(student.source),
@@ -147,6 +159,7 @@ export const applyAttendanceListToDraft = (
   room: attendanceList.room,
   group: attendanceList.group,
   exitReaderId: attendanceList.exitReaderId,
+  readerGroup: attendanceList.readerGroup,
   rows: createScannerAttendanceRows(attendanceList.students),
   loadedAt: attendanceList.generatedAt,
   sentAt: attendanceList.status === "sent"

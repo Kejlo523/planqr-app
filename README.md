@@ -60,7 +60,9 @@ W zakładce **Odczyty na żywo** administrator LDAP może zmienić tryb przez pr
 
 W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam format do wewnętrznego `POST /internal/kantech` z nagłówkiem `Authorization: Bearer <WORKER_SECRET_TOKEN>` i odświeża listę przez `GET /internal/kantech/readers`.
 
-Administrator LDAP konfiguruje wejście i wyjście w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers`. Parę zapisuje się w jednym formularzu. Wariant **Jeden czytnik obsługuje wejście i wyjście** pozwala prowadzącemu zamknąć listę na tym samym urządzeniu co najmniej 60 sekund po otwarciu. Budynek i sala służą do opisu lokalizacji czytników.
+Administrator LDAP w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers` tworzy grupę i wybiera urządzenia ze spisu SmartService. PlanQR pobiera identyfikatory czytników według oznaczenia RCP i adresu urządzenia w etykietach `Doors`. Każdy czytnik w grupie ma rolę wejścia, wyjścia albo obu kierunków. Dotychczasowe konfiguracje par i pojedynczych czytników działają do czasu przeniesienia ich do grupy.
+
+`GET /api/kantech/readers/groups` zwraca zapisane grupy i urządzenia wykryte w SmartService. `POST /api/kantech/readers/groups` zapisuje `name`, listę `devices` z ich `id` oraz `readers: [{ id, role }]`. Role to `ENTRY`, `EXIT` i `BOTH`. Opcjonalne `id` wskazuje edytowaną grupę. `DELETE /api/kantech/readers/groups/:id` usuwa grupę.
 
 `GET /api/kantech/readers` zwraca listę. `POST /api/kantech/readers/setup` przyjmuje `entry` i `exit` w formacie `{ id, label }`, `buildingId`, `roomNumber` oraz opcjonalne `edit`. Wartość `exit: null` jawnie wybiera tryb jednego czytnika. Dotychczasowy `POST /api/kantech/readers` nadal obsługuje pojedyncze rekordy. `DELETE /api/kantech/readers/:id` usuwa czytnik. W trybie `attendance` prowadzący otwiera listę na wejściu, a uczestnik jest zapisywany najwyżej raz.
 
@@ -68,7 +70,7 @@ W bocznym panelu **Czytniki w SmartService** widać wszystkie urządzenia zwróc
 
 Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatycznym rozpoznaniem. Karta studenta w formacie `s<numer albumu>` jest rozpoznawana bez przypisania, a cyfry po `s` trafiają na listę jako numer albumu. Dla prowadzącego aplikacja korzysta z imienia i nazwiska z pamięci LDAP. Przy braku profilu szuka w Planie ZUT jednoznacznego dopasowania inicjału i nazwiska z loginu. Zajęcia wybiera z planu prowadzącego według godziny odbicia karty.
 
-Odczyt karty z adresem w domenie ZUT jest rozpoznawany po loginie przed `@`. ID czytnika wejściowego wskazuje listę, do której trafiają odbicia uczestników. ID sparowanego wyjścia pozwala prowadzącemu ją zamknąć.
+Odczyt karty z adresem w domenie ZUT jest rozpoznawany po loginie przed `@`. Prowadzący otwiera listę na wejściu. Studenci i pozostali prowadzący mogą dopisać się raz przez dowolny czytnik grupy. Listę zamyka osoba, która ją otworzyła, po odbiciu na wyjściu w tej grupie. Czytnik dwukierunkowy pozwala zamknąć listę po upływie co najmniej 60 sekund od otwarcia. Nowe listy zamykają się automatycznie 30 minut przed końcem zajęć. W panelu obecności wyświetlamy login oraz imię i nazwisko z LDAP, gdy profil jest dostępny.
 
 Wartości z `KANTECH_DOOR_IDS` służą do jednorazowego importu po uruchomieniu backendu, jeśli baza nie ma jeszcze zapisanych czytników.
 
@@ -117,4 +119,4 @@ W symulacji można wywołać odbicie gotowej karty albo wpisać własny alias. P
 
 1. Po przygotowaniu bazy i migracji ustaw w prywatnym `.env` serwera `KANTECH_MODE=observe`, `KANTECH_DOOR_IDS=49919`, adres SmartService, dane konta z uprawnieniem do odczytu i odrębny `WORKER_SECRET_TOKEN`. Zbuduj obrazy poleceniem `docker compose build backend frontend` i uruchom `docker compose --profile kantech up -d`.
 2. Zaloguj się ponownie jako administrator przez LDAP i otwórz `/adminpanel/kantech`. Przy czytniku potwierdź status połączenia i odbicia karty prowadzącego, uczestnika i karty nieprzypisanej. Sprawdź, w którym polu SmartService pojawia się `WISYNC_<numer>`, oraz czy zdarzenia wracają po wznowieniu odczytu. Tryb `observe` wyświetla odbicia bez zapisu obecności.
-3. Przypisz czytnik do potwierdzonego budynku i sali w Planie ZUT. Załaduj identyfikatory kart, loginy i identyfikator Plan ZUT dla prowadzącego przez `npm run attendance:configure -- <plik.json>`. Format pokazuje `local/assignments.json`. Po zaliczeniu obserwacji włącz `KANTECH_MODE=attendance` z `KANTECH_ACTIVE_FROM` ustawionym na początek pilotażu w UTC i sprawdź otwarcie listy, dopisanie uczestnika, zamknięcie i XLSX.
+3. W zakładce **Czytniki** wybierz urządzenie RCP i ustaw role jego czytników. W razie potrzeby przypisz aliasy kart w zakładce **Testy i przypisania**. Po zaliczeniu obserwacji włącz automatyczny zapis obecności i sprawdź otwarcie listy, dopisanie uczestnika, zamknięcie i XLSX.

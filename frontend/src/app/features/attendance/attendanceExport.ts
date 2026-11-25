@@ -1,4 +1,4 @@
-import type { AttendanceDraft, AttendanceRow } from "./attendanceDrafts";
+import { attendanceStatusLabel, type AttendanceDraft } from "./attendanceDrafts";
 
 interface ZipSourceFile {
   name: string;
@@ -224,7 +224,8 @@ const buildCell = (value: string | number | null | undefined, row: number, colum
   const normalizedValue = value === null || value === undefined ? "" : String(value);
   const reference = `${getColumnName(column)}${row}`;
 
-  return `<c r="${reference}" t="inlineStr"><is><t>${escapeXml(normalizedValue)}</t></is></c>`;
+  if (typeof value === "number") return `<c r="${reference}"><v>${value}</v></c>`;
+  return `<c r="${reference}"${row === 3 ? ' s="1"' : ''} t="inlineStr"><is><t>${escapeXml(normalizedValue)}</t></is></c>`;
 };
 
 const buildWorksheetXml = (rows: Array<Array<string | number | null | undefined>>) => {
@@ -241,84 +242,31 @@ const buildWorksheetXml = (rows: Array<Array<string | number | null | undefined>
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheetViews><sheetView workbookViewId="0"/></sheetViews>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="15"/>
   <cols>
     <col min="1" max="1" width="7" customWidth="1"/>
-    <col min="2" max="2" width="30" customWidth="1"/>
-    <col min="3" max="3" width="18" customWidth="1"/>
-    <col min="4" max="4" width="24" customWidth="1"/>
-    <col min="5" max="5" width="15" customWidth="1"/>
-    <col min="6" max="10" width="18" customWidth="1"/>
+    <col min="2" max="3" width="26" customWidth="1"/>
+    <col min="4" max="4" width="19" customWidth="1"/>
+    <col min="5" max="5" width="23" customWidth="1"/>
   </cols>
   <sheetData>${sheetRows}</sheetData>
+  <autoFilter ref="A3:E${rows.length}"/>
 </worksheet>`;
 };
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("pl-PL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-};
-
-const getSourceLabel = (row: AttendanceRow) =>
-  row.source === "scanner" ? "skaner" : "ręczny";
-
 const buildAttendanceRows = (
   draft: AttendanceDraft,
-  lessonId?: string | number | null,
 ): Array<Array<string | number | null | undefined>> => [
-  ["Lista obecności"],
-  ["ID zajęć", lessonId ?? draft.lessonId ?? ""],
-  ["Przedmiot", draft.title ?? ""],
-  ["Sala", draft.room ?? ""],
-  ["Grupa", draft.group ?? ""],
-  ["Status", draft.status],
-  ["Sesja", draft.sessionId ?? ""],
-  ["Prowadzący", draft.lecturerDisplayName ?? ""],
-  ["Login prowadzącego", draft.lecturerUsername ?? ""],
-  ["Otwarto", formatDateTime(draft.openedAt)],
-  ["Zamknięto", formatDateTime(draft.closedAt)],
-  ["Wysłano", formatDateTime(draft.sentAt)],
-  ["Wygenerowano", formatDateTime(new Date().toISOString())],
-  ["Liczba wpisów", draft.rows.length],
+  ["Stan", attendanceStatusLabel[draft.status]],
   [],
-  [
-    "Lp.",
-    "Nazwisko i imię",
-    "Login",
-    "Numer albumu / karta",
-    "Godzina wejścia",
-    "Źródło",
-    "Pierwszy skan",
-    "Ostatni skan",
-    "Liczba skanów",
-    "Status",
-  ],
+  ["Lp.", "Imię", "Nazwisko", "Numer albumu", "Godzina odbicia"],
   ...draft.rows.map((row, index) => [
     index + 1,
-    row.displayName ?? "",
-    row.username ?? "",
+    row.givenName,
+    row.surname,
     row.albumNumber,
     row.enteredAt ?? "",
-    getSourceLabel(row),
-    formatDateTime(row.firstScannedAt),
-    formatDateTime(row.lastScannedAt),
-    row.scanCount ?? "",
-    row.status ?? "",
   ]),
 ];
 
@@ -330,6 +278,7 @@ const buildXlsxFiles = (worksheetXml: string): ZipSourceFile[] => [
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
@@ -376,7 +325,20 @@ const buildXlsxFiles = (worksheetXml: string): ZipSourceFile[] => [
     content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`,
+  },
+  {
+    name: "xl/styles.xml",
+    content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`,
   },
   {
     name: "xl/worksheets/sheet1.xml",
@@ -405,7 +367,7 @@ export const downloadAttendanceXlsx = (
   draft: AttendanceDraft,
   lessonId?: string | number | null,
 ) => {
-  const worksheetXml = buildWorksheetXml(buildAttendanceRows(draft, lessonId));
+  const worksheetXml = buildWorksheetXml(buildAttendanceRows(draft));
   const blob = createZipBlob(buildXlsxFiles(worksheetXml));
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

@@ -1,7 +1,7 @@
 import { AttendanceScan, KantechEvent, Prisma, PrismaClient } from '@prisma/client';
 import { env } from '../config/env';
 import { findLecturerLessons, findLessons } from './schedule';
-import { buildTimeline, Lesson, lessonSchema } from './timeline';
+import { ATTENDANCE_RULES_VERSION, attendanceDeadline, buildTimeline, isReaderGroupScope, Lesson, lessonSchema, readerGroupScope } from './timeline';
 import { cardAliasKeys, normalizeCardLogin } from './cardAlias';
 import { attendanceIdentity } from './identity';
 
@@ -93,13 +93,14 @@ export async function projectRoom(tx: Prisma.TransactionClient, roomKey: string)
 async function ingestScans(tx: Prisma.TransactionClient, readerId: string, events: KantechEvent[]) {
     await lockReaderConfiguration(tx);
     const [reader, assignments, profiles] = await Promise.all([
-        tx.attendanceReader.findUnique({ where: { id: readerId }, include: { entryReader: true } }),
+        tx.attendanceReader.findUnique({ where: { id: readerId }, include: { entryReader: true, group: { select: { name: true } } } }),
         tx.attendanceCard.findMany({ where: { alias: { in: [...new Set(events.flatMap((event) => cardAliasKeys(event.alias)))] } } }),
         tx.ldapUser.findMany({ where: { username: { in: [...new Set(events.map((event) => normalizeCardLogin(event.alias)))] } } }),
     ]);
-    const entry = reader?.direction === 'EXIT' ? reader.entryReader : reader;
+    const grouped = reader?.groupId != null;
+    const entry = !grouped && reader?.direction === 'EXIT' ? reader.entryReader : reader;
     const exitReaderId = entry?.singleReader ? entry.id : entry?.exitReaderId ?? null;
-    const readerScope = `reader:${entry?.id ?? readerId}`;
+    const readerScope = reader?.groupId != null ? readerGroupScope(reader.groupId) : `reader:${entry?.id ?? readerId}`;
     const cards = new Map(assignments.map((card) => [card.alias, card]));
     const profilesByLogin = new Map(profiles.map((profile) => [profile.username, profile]));
     const results = new Map<string, string[]>();
@@ -111,7 +112,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
         const { occurredAt } = event;
         const invalid = !reader ? 'unknown_reader' : !occurredAt ? 'invalid_time'
             : !event.granted ? 'access_denied' : !card ? 'unknown_card'
-            : !exitReaderId && event.captureMode === 'attendance' ? 'reader_without_pair' : null;
+            : !grouped && !exitReaderId && event.captureMode === 'attendance' ? 'reader_without_pair' : null;
         let outcome = invalid ?? 'observed';
         if (reader?.direction && entry && card && occurredAt && !invalid && event.captureMode === 'attendance') {
             outcome = 'outside_cutover';
@@ -120,8 +121,9 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
                 outcome = 'received';
                 data.push({
                     id: event.id, readerId, roomKey: readerScope, buildingId: entry.buildingId, roomNumber: entry.roomNumber,
-                    roomLabel: entry.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
+                    roomLabel: reader.group?.name ?? entry.label, alias: card.alias, login: card.login, name: card.name, album: card.album,
                     readerDirection: reader.direction, exitReaderId, isLecturer: card.isLecturer,
+                    rulesVersion: ATTENDANCE_RULES_VERSION,
                     scheduleId: card.scheduleId, occurredAt, receivedAt: event.receivedAt,
                     resolution: card.isLecturer && reader.direction === 'ENTRY' ? 'pending' : 'none',
                     retryAt: card.isLecturer && reader.direction === 'ENTRY' ? new Date() : null,
@@ -137,7 +139,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
         const earliest = new Date(Math.min(...times));
         const latest = new Date(Math.max(...times));
         // Keep late taps and lists already open on a legacy room timeline attached to that list.
-        const legacySessions = await tx.attendanceSession.findMany({
+        const legacySessions = grouped ? [] : await tx.attendanceSession.findMany({
             where: {
                 readerId: entry.id, roomKey: { not: readerScope }, voided: false, openedAt: { lte: latest },
                 OR: [{ closesAt: null }, { closesAt: { gt: earliest } }],
@@ -148,7 +150,7 @@ async function ingestScans(tx: Prisma.TransactionClient, readerId: string, event
         for (const scan of data) {
             const legacy = legacySessions.find(({ openedAt, closesAt }) =>
                 scan.occurredAt >= openedAt && (!closesAt || scan.occurredAt < closesAt));
-            if (legacy) scan.roomKey = legacy.roomKey;
+            if (legacy && !isReaderGroupScope(legacy.roomKey)) scan.roomKey = legacy.roomKey;
             scopes.add(scan.roomKey);
         }
         for (const scope of [...scopes].sort()) await lockRoom(tx, scope);
@@ -204,7 +206,7 @@ export function startKantechIngestionJob() {
 
 export async function resolvePendingScans() {
     const scans = await attendanceDb.attendanceScan.findMany({
-        where: { resolution: 'pending', retryAt: { lte: new Date() } },
+        where: { resolution: 'pending', outcome: 'pending', retryAt: { lte: new Date() } },
         orderBy: { retryAt: 'asc' },
         take: 10,
     });
@@ -216,6 +218,9 @@ export async function resolvePendingScans() {
                 : await findLecturerLessons(scan.login, await attendanceDb.ldapUser.findUnique({
                     where: { username: scan.login }, select: { givenName: true, surname: true },
                 }), scan.occurredAt);
+            if (scan.rulesVersion === ATTENDANCE_RULES_VERSION) {
+                candidates = candidates.filter(({ end }) => +scan.occurredAt < attendanceDeadline(end));
+            }
         } catch {
             await attendanceDb.attendanceScan.updateMany({
                 where: { id: scan.id, resolution: 'pending' },

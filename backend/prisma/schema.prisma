@@ -243,6 +243,17 @@ model AttendanceReader {
   exitReader AttendanceReader? @relation("ReaderPair", fields: [exitReaderId], references: [id], onDelete: SetNull)
   entryReader AttendanceReader? @relation("ReaderPair")
   kantechStatus KantechReaderStatus?
+  groupId    Int?
+  deviceId   String?
+  group      AttendanceReaderGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([groupId])
+}
+
+model AttendanceReaderGroup {
+  id      Int @id @default(autoincrement())
+  name    String
+  readers AttendanceReader[]
 }
 
 enum ReaderDirection {
@@ -350,6 +361,7 @@ model AttendanceScan {
   retryAt        DateTime? @db.Timestamptz(3)
   resolution     String   @default("none")
   outcome        String   @default("received")
+  rulesVersion   Int      @default(1)
 
   @@index([roomKey, occurredAt, id])
   @@index([resolution, retryAt])

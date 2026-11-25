@@ -6,6 +6,7 @@ const { parseReaderSnapshot, parseSmartServiceDoors, parseSmartServiceDoorState,
 const { parseCampusTime } = require('../dist/attendance/scheduleTime');
 const { cardAliasKeys, normalizeCardAlias, normalizeCardLogin } = require('../dist/attendance/cardAlias');
 const { attendanceIdentity } = require('../dist/attendance/identity');
+const { groupInventoryByDevice } = require('../dist/attendance/inventory');
 
 const start = '2026-11-18T10:00:00.000Z';
 const end = '2026-11-18T11:00:00.000Z';
@@ -108,6 +109,17 @@ test('one reader closes only for the lecturer at least 60 seconds after opening'
     assert.equal(outcomes.get('after-close'), 'no_session');
     assert.equal(session.closesAt.toISOString(), time('10:01:00'));
     assert.deepEqual([...session.members.keys()], ['n57796']);
+});
+
+test('SmartService RCP inventory groups door records by controller and ignores door metadata', () => {
+    const doors = parseSmartServiceDoors('<Reply><item><key><string>DESCRIPTION2</string></key><value>RCP04 - Exit</value></item>' +
+        '<Door><PkData>49919</PkData><Description>(01.01.1) RCP04-WI</Description></Door>' +
+        '<Door><PkData>49920</PkData><Description>(01.01.2) RCP04-WI - Exit</Description></Door>' +
+        '<Door><PkData>49921</PkData><Description>(01.02.1) RCP-05-WI</Description></Door></Reply>');
+    assert.deepEqual(doors.map(({ id }) => id), ['49919', '49920', '49921']);
+    const devices = groupInventoryByDevice(doors.map((door) => ({ ...door, state: 'unknown' })));
+    assert.deepEqual(devices.map(({ id, readers }) => [id, readers.map((reader) => reader.id)]),
+        [['RCP-04@01.01', ['49919', '49920']], ['RCP-05@01.02', ['49921']]]);
 });
 
 test('SmartService timestamps use Warsaw and snapshot positions do not change event identity', () => {

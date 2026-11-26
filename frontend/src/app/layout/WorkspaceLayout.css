@@ -12,6 +12,12 @@
   --sidebar-duration: 290ms;
   --sidebar-easing: cubic-bezier(.22, 1, .36, 1);
   --sidebar-width: var(--admin-sidebar-width);
+  --workspace-page-width: clamp(78rem, 75vw, 142rem);
+}
+
+.workspace-layout__content > .admin-console__main {
+  width: min(100%, var(--workspace-page-width));
+  margin-inline: auto;
 }
 
 .workspace-layout[data-sidebar="collapsed"] { --sidebar-width: 4rem; }

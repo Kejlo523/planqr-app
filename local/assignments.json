@@ -7,7 +7,7 @@
   ],
   "cards": [
     { "alias": "WISYNC_1", "login": "pilot-admin", "name": "Prowadzący testowy", "scheduleId": "test-teacher" },
-    { "alias": "WISYNC_2", "login": "student-test", "name": "Student testowy", "album": "123456" },
+    { "alias": "WISYNC_2", "login": "s123456", "name": "Student testowy", "album": "123456" },
     { "alias": "WISYNC_3", "login": "guest-test", "name": "Gość testowy" },
     { "alias": "WISYNC_4", "login": "lecturer-two", "name": "Drugi prowadzący", "scheduleId": "test-teacher-2" }
   ]

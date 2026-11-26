@@ -50,6 +50,7 @@ export default function AdminAuditLog() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [daysInput, setDaysInput] = useState<string | null>(null);
+  const [retentionCollapsed, setRetentionCollapsed] = useState(true);
   const [saving, setSaving] = useState(false);
   const [retentionStatus, setRetentionStatus] = useState("");
   const [retentionError, setRetentionError] = useState("");
@@ -123,7 +124,8 @@ export default function AdminAuditLog() {
       navigation={{ ownPlan: canOpenLecturerPlan(session) }}>
       <main className="admin-console__main admin-audit">
         <h1 className="admin-workspace-title">Logi</h1>
-        <AdminPanelSection title="Przechowywanie">
+        <AdminPanelSection title="Przechowywanie logów" collapsible collapsed={retentionCollapsed}
+          onToggleCollapsed={() => setRetentionCollapsed((collapsed) => !collapsed)}>
           <form className="admin-audit__retention" onSubmit={(event) => void saveRetention(event)}>
             <label className="admin-form-field">
               <span className="admin-form-field__label">Okres przechowywania w dniach</span>
@@ -138,7 +140,7 @@ export default function AdminAuditLog() {
             {retentionError && <span role="alert" className="admin-feedback admin-feedback--danger">{retentionError}</span>}
           </form>
         </AdminPanelSection>
-        <AdminPanelSection title="Dziennik systemu" actions={
+        <AdminPanelSection title="Dziennik systemu" className="admin-audit__journal" actions={
           <button type="button" className="admin-button admin-button--secondary" disabled={loading} onClick={refresh}>Odśwież</button>
         }>
           <form className="admin-audit__filters" onSubmit={search}>
@@ -174,14 +176,15 @@ export default function AdminAuditLog() {
           {loading ? <p className="admin-audit__status" role="status">Ładowanie logów…</p>
             : loadError ? <p className="admin-audit__status" role="alert">{loadError}</p>
               : data?.entries.length ? (
-                <AdminPanelTable caption="Dziennik działań w PlanQR" columns={["Data i godzina", "Użytkownik", "Obszar", "Działanie", "Dotyczy"]}>
+                <AdminPanelTable caption="Dziennik działań w PlanQR" className="admin-table--compact"
+                  columns={["Data i godzina", "Użytkownik", "Obszar", "Działanie", "Dotyczy"]}>
                   {data.entries.map((entry) => (
                     <tr key={entry.id}>
-                      <td><time dateTime={entry.occurredAt}>{formatter.format(new Date(entry.occurredAt))}</time></td>
-                      <td>{entry.actor}</td>
-                      <td>{areas[entry.category]}</td>
-                      <td><strong>{entry.action}</strong></td>
-                      <td>{entry.target ?? "—"}</td>
+                      <td data-label="Data i godzina"><time dateTime={entry.occurredAt}>{formatter.format(new Date(entry.occurredAt))}</time></td>
+                      <td data-label="Użytkownik">{entry.actor}</td>
+                      <td data-label="Obszar">{areas[entry.category]}</td>
+                      <td data-label="Działanie"><strong>{entry.action}</strong></td>
+                      <td data-label="Dotyczy">{entry.target ?? "—"}</td>
                     </tr>
                   ))}
                 </AdminPanelTable>

@@ -71,11 +71,13 @@ export function parseSmartServiceDoors(text: string): InventoryDoor[] {
         if (parsed.success && (!doors.has(parsed.data.id) || parsed.data.label)) doors.set(parsed.data.id, parsed.data);
     };
     for (const node of xmlNodes(xml)) {
-        const id = field(node, ...doorIdFields) ?? field(node, 'key');
+        const key = field(node, 'key');
+        const id = field(node, ...doorIdFields) ?? (key && /^\d+$/.test(key) ? key : undefined);
         if (id) add(id, field(node, ...doorLabelFields) ?? field(node, 'value'));
     }
     for (const item of findItems(xml)) {
-        const key = typeof item.key === 'string' ? item.key : isNode(item.key) ? field(item.key, 'string', 'int') : undefined;
+        const rawKey = typeof item.key === 'string' ? item.key : isNode(item.key) ? field(item.key, 'string', 'int') : undefined;
+        const key = rawKey && /^\d+$/.test(rawKey) ? rawKey : undefined;
         const value = isNode(item.value) ? item.value.SmartLinkDataValue ?? item.value : item.value;
         if (isNode(value)) {
             add(field(value, ...doorIdFields) ?? key, field(value, ...doorLabelFields) ?? field(value, 'value', 'string'));

@@ -5,6 +5,11 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { AuthRequest, requireLecturerAccess } from '../middlewares/authMiddleware';
 import { CAMPUS_ZONE } from '../attendance/scheduleTime';
+import { getSimulationAttendance } from '../attendance/devSimulation';
+import { env } from '../config/env';
+import { isReaderGroupScope } from '../attendance/timeline';
+import { LdapDirectoryService } from '../services/ldapDirectoryService';
+import { findCachedLdapUsersByUsername, upsertCachedLdapUser } from '../services/ldapUserCacheService';
 import {
     attendanceDb, lockRoom, projectRoom, readCandidates,
 } from '../attendance/store';
@@ -23,16 +28,49 @@ const memberBody = z.object({
     entered_at: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/).optional(),
 });
 
-type SessionWithMembers = AttendanceSession & { members: AttendanceMember[] };
-const memberView = (member: AttendanceMember) => ({
+type ListMember = Pick<AttendanceMember, 'id' | 'login' | 'name' | 'album' | 'firstAt' | 'lastAt' | 'count' | 'manual'>;
+type SessionWithMembers = Pick<AttendanceSession,
+    'lessonId' | 'lessonStart' | 'lessonEnd' | 'title' | 'lessonGroup' | 'roomLabel' | 'ownerLogin' | 'ownerName' | 'readerId' |
+    'exitReaderId' | 'roomKey' | 'openedAt' | 'closesAt' | 'sentAt'> & {
+    id: number | null; members: ListMember[]; simulated?: true;
+};
+const directory = new LdapDirectoryService();
+const nextProfileLookup = new Map<string, number>();
+const profileLogin = (member: ListMember) => /^\d+$/.test(member.login) ? 's' + member.login : member.login;
+type MemberProfile = { displayName: string; givenName: string | null; surname: string | null };
+
+async function memberProfiles(members: AttendanceMember[]) {
+    const usernames = [...new Set(members.map(profileLogin))];
+    const profiles = new Map<string, MemberProfile>(await findCachedLdapUsersByUsername(usernames));
+    if (!directory.isConfigured()) return profiles;
+    const now = Date.now();
+    for (const [username, retryAt] of nextProfileLookup) {
+        if (retryAt <= now) nextProfileLookup.delete(username);
+    }
+    const missing = usernames.filter((username) => !profiles.has(username) && !nextProfileLookup.has(username));
+    if (missing.length) {
+        for (const username of missing) nextProfileLookup.set(username, now + 5 * 60_000);
+        try {
+            for (const [username, profile] of await directory.findUsers(missing)) {
+                profiles.set(username, profile);
+                await upsertCachedLdapUser(profile);
+            }
+        } catch {
+            console.error('[Attendance] LDAP participant lookup is unavailable.');
+        }
+    }
+    return profiles;
+}
+
+const memberView = (member: ListMember, profile?: MemberProfile) => ({
     id: member.id,
     userId: member.id,
     studentId: member.login,
     albumNumber: member.album ?? '',
-    username: member.login,
-    displayName: member.name,
-    givenName: null,
-    surname: null,
+    username: profileLogin(member),
+    displayName: profile?.displayName || member.name,
+    givenName: profile?.givenName || null,
+    surname: profile?.surname || null,
     cardHex: '',
     present: true,
     source: member.manual ? 'manual' : 'scanner',
@@ -44,17 +82,19 @@ const memberView = (member: AttendanceMember) => ({
     scanCount: member.count,
 });
 
-const sessionStatus = (session: AttendanceSession, now = new Date()) =>
+const sessionStatus = (session: Pick<AttendanceSession, 'closesAt' | 'sentAt'>, now = new Date()) =>
     session.sentAt ? 'sent' : session.closesAt && session.closesAt <= now ? 'closed' : 'open';
-const sessionView = (session: SessionWithMembers) => {
-    const now = new Date();
+const sessionView = (session: SessionWithMembers, profiles?: ReadonlyMap<string, MemberProfile>, now = new Date()) => {
     const status = sessionStatus(session, now);
     const closedAt = status === 'open' ? null : session.closesAt?.toISOString() ?? null;
     return {
         status,
+        simulated: session.simulated,
         sessionId: session.id,
         dydaktykId: session.id,
         lessonId: session.lessonId,
+        lessonStart: session.lessonStart.toISOString(),
+        lessonEnd: session.lessonEnd.toISOString(),
         title: session.title,
         group: session.lessonGroup,
         room: session.roomLabel,
@@ -64,6 +104,7 @@ const sessionView = (session: SessionWithMembers) => {
         lecturerCardHex: '',
         doorId: session.readerId,
         exitReaderId: session.exitReaderId,
+        readerGroup: isReaderGroupScope(session.roomKey),
         openedAt: session.openedAt.toISOString(),
         closedAt,
         from: session.openedAt.toISOString(),
@@ -72,7 +113,7 @@ const sessionView = (session: SessionWithMembers) => {
         totalScans: session.members.reduce((total, member) => total + member.count, 0),
         totalPresent: session.members.length,
         truncated: false,
-        students: session.members.map(memberView),
+        students: session.members.map((member) => memberView(member, profiles?.get(profileLogin(member)))),
     };
 };
 const members = {
@@ -154,9 +195,26 @@ router.get('/list', handle(async (req, res) => {
         include: members,
         take: 2,
     });
+    if (!results.length && env.KANTECH_DEV_TOOLS && req.user!.ldapAuthenticated &&
+        !id && query.teacher && query.lesson_id && query.from) {
+        const preview = getSimulationAttendance(owner(req).ownerLogin, query.lesson_id, query.from, query.teacher);
+        if (preview) {
+            const { lesson, opener, closesAt, members } = preview.session;
+            const entries = [...members.values()].map((member, index) => ({ ...member, id: index + 1, manual: false }));
+            res.json(sessionView({
+                id: null, simulated: true, lessonId: lesson.id, title: lesson.title,
+                lessonStart: new Date(lesson.start), lessonEnd: new Date(lesson.end),
+                lessonGroup: lesson.group ?? null, roomLabel: lesson.room || opener.roomLabel,
+                ownerLogin: opener.login, ownerName: lesson.teacherName || opener.name,
+                readerId: opener.readerId, exitReaderId: opener.exitReaderId ?? null,
+                roomKey: opener.roomKey, openedAt: opener.occurredAt, closesAt, sentAt: null, members: entries,
+            }, await findCachedLdapUsersByUsername(entries.map(profileLogin)), preview.now));
+            return;
+        }
+    }
     if (!results.length) throw new RequestError(404, 'Attendance session not found');
     if (results.length > 1) throw new RequestError(409, 'Specify the occurrence start time');
-    res.json(sessionView(results[0]));
+    res.json(sessionView(results[0], await memberProfiles(results[0].members)));
 }));
 
 router.get('/pending', handle(async (req, res) => {
@@ -193,7 +251,9 @@ router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę 
     await editSession(req, async (tx, session) => {
         const now = new Date();
         if (session.closesAt && session.closesAt <= now) return;
-        if (session.exitReaderId) throw new RequestError(409, 'Close the list with the configured exit reader');
+        if (session.exitReaderId || isReaderGroupScope(session.roomKey)) {
+            throw new RequestError(409, 'Close the list with the configured exit reader');
+        }
         await tx.attendanceSession.update({
             where: { id: session.id }, data: { manualClosedAt: now },
         });
@@ -203,7 +263,7 @@ router.post('/sessions/:id/close', auditAction('ATTENDANCE', 'Zamknięto listę 
         where: { ...owner(req), id: idSchema.parse(req.params.id) }, include: members,
     });
     if (!session) throw new RequestError(404, 'Attendance session not found');
-    res.json(sessionView(session));
+    res.json(sessionView(session, await memberProfiles(session.members)));
 }));
 
 router.post('/sessions/:id/send', auditAction('ATTENDANCE', 'Przygotowano listę obecności do wysyłki'), handle(async (req, res) => {
@@ -213,14 +273,15 @@ router.post('/sessions/:id/send', auditAction('ATTENDANCE', 'Przygotowano listę
             where: { id: session.id }, data: { sentAt: session.sentAt ?? new Date() }, include: members,
         });
     });
-    res.json(sessionView(updated));
+    res.json(sessionView(updated, await memberProfiles(updated.members)));
 }));
 
 router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do listy obecności'), handle(async (req, res) => {
     const payload = memberBody.parse(req.body);
     const result = await editSession(req, async (tx, session) => {
         if (sessionStatus(session) !== 'open') throw new RequestError(409, 'Attendance session is closed');
-        const login = payload.username.toLowerCase();
+        const username = payload.username.toLowerCase();
+        const login = /^\d+$/.test(username) ? 's' + username : username;
         let at = new Date();
         if (payload.entered_at) {
             const lessonDate = DateTime.fromJSDate(session.lessonStart, { zone: CAMPUS_ZONE });
@@ -230,7 +291,7 @@ router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do l
         if (at < session.openedAt || (session.closesAt && at >= session.closesAt)) {
             throw new RequestError(400, 'Attendance time must be within the session');
         }
-        const album = /^\d+$/.test(login) ? login : null;
+        const album = /^s?(\d+)$/.exec(login)?.[1] ?? null;
         const data = { name: payload.username, album, firstAt: at, lastAt: at, count: 1, manual: true, removed: false };
         return tx.attendanceMember.upsert({
             where: { sessionId_login: { sessionId: session.id, login } },
@@ -238,7 +299,7 @@ router.post('/sessions/:id/users', auditAction('ATTENDANCE', 'Dodano osobę do l
             update: data,
         });
     });
-    res.status(201).json({ user: memberView(result) });
+    res.status(201).json({ user: memberView(result, (await memberProfiles([result])).get(profileLogin(result))) });
 }));
 
 router.delete('/sessions/:id/users/:userId', auditAction('ATTENDANCE', 'Usunięto osobę z listy obecności'), handle(async (req, res) => {

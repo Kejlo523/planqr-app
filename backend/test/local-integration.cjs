@@ -99,7 +99,7 @@ async function browserSmoke(api, simulator, password, directory) {
         const gridBody = page.locator('.admin-devices-grid .ag-body-viewport');
         await gridBody.waitFor({ state: 'attached' });
         const tabletSelection = page.getByRole('checkbox', { name: /^Zaznacz tablet / });
-        for (const width of [1920, 1440, 1280, 1024, 390]) {
+        for (const width of [3840, 2560, 1920, 1440, 1280, 1024, 390]) {
             await page.setViewportSize({ width, height: 950 });
             assert.ok((await gridBody.boundingBox())?.height >= 64, 'Tablet grid has room for a row at ' + width + 'px');
             await tabletSelection.waitFor();
@@ -153,7 +153,26 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByRole('link', { name: 'Kantech', exact: true }).click();
         await page.getByRole('heading', { name: 'Kantech na żywo' }).waitFor();
         await page.getByRole('cell', { name: cardId, exact: true }).waitFor();
+        assert.equal(await page.getByRole('region', { name: 'Stan czytników' }).count(), 0);
+        await page.setViewportSize({ width: 390, height: 780 });
+        const extraFilters = page.getByRole('button', { name: 'Filtry', exact: true });
+        await extraFilters.waitFor();
+        assert.equal(await page.getByLabel('RCP', { exact: true }).isVisible(), false);
+        await extraFilters.click();
+        assert.equal(await page.getByLabel('RCP', { exact: true }).isVisible(), true);
+        await extraFilters.click();
+        await page.setViewportSize({ width: 1200, height: 780 });
         await page.getByRole('cell', { name: 'Zamknięto listę' }).first().waitFor();
+        await page.getByLabel('Szukaj odbić').fill(cardId);
+        await page.getByLabel('RCP', { exact: true }).selectOption('RCP-22@01.02');
+        await page.getByLabel('Czytnik', { exact: true }).selectOption('49920');
+        await page.getByLabel('Wynik', { exact: true }).selectOption('access_denied');
+        await page.getByLabel('Liczba wyników').selectOption('10');
+        const matchingReading = page.getByRole('row').filter({ hasText: cardId });
+        await matchingReading.getByRole('cell', { name: 'RCP-22 · 01.02' }).waitFor();
+        await matchingReading.getByRole('cell', { name: /49920.*Wejście/ }).waitFor();
+        await page.getByText('Wyświetlono 1', { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Wyczyść filtry' }).click();
         const screenshots = process.env.PLANQR_TEST_SCREENSHOTS;
         if (screenshots) {
             await page.screenshot({ path: join(screenshots, 'kantech-desktop.png') });
@@ -168,14 +187,36 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.match(download.suggestedFilename(), /\.xlsx$/);
         const content = await readFile(await download.path());
         assert.equal(content.subarray(0, 2).toString(), 'PK');
+        assert.ok(content.includes(Buffer.from('showGridLines="1"')));
+        assert.ok(!content.includes(Buffer.from('<mergeCells')));
         assert.ok(content.includes(Buffer.from('xl/worksheets/sheet1.xml')));
-        assert.ok(content.includes(Buffer.from('guest-test')));
+        for (const value of ['PlanQR · Lista obecności', 'Przedmiot', 'Fixture 9001', 'Prowadzący', 'Termin zajęć',
+            'Sala', 'TEST 201', 'Grupa', 'Liczba wpisów', 'Stan', 'Lista zamknięta',
+            'Lp.', 'Imię', 'Nazwisko', 'Numer albumu', 'Godzina odbicia', 'Łucja', 'Żak', '123456']) {
+            assert.ok(content.includes(Buffer.from(value)), value);
+        }
+        assert.ok(!content.includes(Buffer.from('guest-test')));
         await page.goto(url + '/attendance/9003');
         await page.getByText('Lista otwarta', { exact: true }).waitFor();
         const inProgressFile = page.waitForEvent('download');
         await page.getByRole('button', { name: 'Pobierz XLSX' }).click();
         const inProgressContents = await readFile(await (await inProgressFile).path());
-        assert.ok(inProgressContents.includes(Buffer.from('Fixture 9003')));
+        assert.ok(inProgressContents.includes(Buffer.from('Lista otwarta')));
+        await page.setViewportSize({ width: 390, height: 720 });
+        const manualEntry = page.locator('.lesson-attendance');
+        const albumInput = manualEntry.getByLabel('Numer albumu lub karta');
+        await albumInput.waitFor({ state: 'hidden' });
+        await manualEntry.getByRole('button', { name: 'Dodaj osobę', exact: true }).click();
+        await albumInput.fill('012388');
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'attendance-mobile-form.png') });
+        await page.route(/\/api\/attendance\/sessions\/\d+\/users$/, (route) =>
+            route.fulfill({ status: 503, json: { message: 'Temporary fixture failure' } }), { times: 1 });
+        await manualEntry.getByRole('button', { name: 'Dodaj do listy' }).click();
+        await manualEntry.getByRole('alert').getByText('Nie udało się dodać osoby.', { exact: false }).waitFor();
+        assert.equal(await albumInput.inputValue(), '012388');
+        await manualEntry.getByRole('button', { name: 'Dodaj do listy' }).click();
+        await manualEntry.getByText('s012388', { exact: true }).waitFor();
+        await albumInput.waitFor({ state: 'hidden' });
         await page.goto(url + '/adminpanel/kantech?=dev');
         await page.getByRole('heading', { name: 'Testy Kantecha' }).waitFor();
         await page.getByLabel('Alias z czytnika').fill('wi_sync77');
@@ -187,10 +228,21 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByRole('button', { name: 'Szukaj w Planie ZUT' }).click();
         await page.getByRole('button', { name: 'Prowadzacy Testowy', exact: true }).click();
         await page.getByRole('heading', { name: 'Teraz', exact: true }).waitFor();
+        const simulation = page.getByRole('region', { name: 'Symulacja odbić' });
+        const device = simulation.getByLabel('Urządzenie RCP');
+        const reader = simulation.getByLabel('Czytnik', { exact: true });
+        await device.selectOption('RCP-04@01.04');
+        assert.equal(await reader.inputValue(), '49701');
+        assert.deepEqual(await reader.locator('option').evaluateAll((options) => options.map((item) => item.value)), ['49701', '49702']);
         await page.getByRole('button', { name: 'WISYNC_1 · Prowadzący' }).click();
         await page.getByText('Otwarto listę', { exact: false }).first().waitFor();
+        await reader.selectOption('49702');
         await page.getByRole('button', { name: 'WISYNC_2 · Student' }).click();
         await page.getByText('Dopisano obecność', { exact: false }).first().waitFor();
+        await page.getByRole('button', { name: 'WISYNC_1 · Prowadzący' }).click();
+        await simulation.getByText('Zamknięto listę', { exact: false }).first().waitFor();
+        await device.selectOption('RCP-05@01.05');
+        assert.equal(await reader.inputValue(), '49703');
         await page.setViewportSize({ width: 400, height: 720 });
         await page.evaluate(() => window.scrollTo(0, 0));
         await page.mouse.move(8, 400);
@@ -224,73 +276,105 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByRole('button', { name: 'Panel obecności', exact: true }).click();
         const attendance = page.locator('.lesson-attendance');
         await attendance.getByText('Dla tych zajęć nie ma jeszcze sesji obecności.').waitFor();
+        assert.equal(await page.getByRole('dialog', { name: 'Lista obecności' }).count(), 0);
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'calendar-desktop-attendance.png') });
+        await page.setViewportSize({ width: 1920, height: 940 });
+        await lessonHeading.waitFor();
+        await attendance.getByRole('heading', { name: 'Lista obecności' }).waitFor();
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'calendar-wide-attendance.png') });
         await page.setViewportSize({ width: 390, height: 720 });
         await page.locator('.lecturer-console__drawer--attendance').getByText('Lista obecności', { exact: true }).waitFor();
-        await attendance.getByRole('button', { name: 'Zamknij panel obecności' }).click();
+        const attendanceSheet = page.getByRole('dialog', { name: 'Lista obecności' });
+        const attendanceBox = await attendanceSheet.boundingBox();
+        const attendanceClose = await attendance.getByRole('button', { name: 'Zamknij panel obecności' }).boundingBox();
+        assert.ok(attendanceBox.height < 720 * .75);
+        assert.ok(attendanceClose.x + attendanceClose.width > attendanceBox.x + attendanceBox.width - 18);
+        assert.ok(attendanceClose.y < attendanceBox.y + 16);
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'calendar-mobile-attendance.png') });
+        await page.keyboard.press('Escape');
         await lessonHeading.waitFor();
-        await page.getByRole('button', { name: 'Zamknij panel zajęć' }).click();
+        const detailsSheet = page.getByRole('dialog', { name: 'Szczegóły zajęć' });
+        const detailsBox = await detailsSheet.boundingBox();
+        const detailsClose = detailsSheet.getByRole('button', { name: 'Zamknij panel zajęć' });
+        const detailsCloseBox = await detailsClose.boundingBox();
+        assert.ok(detailsBox.height < 720 * .75);
+        assert.ok(detailsCloseBox.x + detailsCloseBox.width > detailsBox.x + detailsBox.width - 18);
+        assert.ok(detailsCloseBox.y < detailsBox.y + 16);
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'calendar-mobile-details.png') });
+        await detailsClose.click();
         await lessonHeading.waitFor({ state: 'hidden' });
+        await page.getByRole('combobox', { name: 'Widok kalendarza' }).waitFor();
+        assert.equal(await page.getByRole('combobox', { name: 'Szukaj prowadzącego' }).isVisible(), false);
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'calendar-mobile-plan.png') });
+        await page.getByRole('button', { name: 'Zmień prowadzącego' }).click();
+        await page.getByRole('combobox', { name: 'Szukaj prowadzącego' }).waitFor();
+        await page.unroute(/\/api\/attendance\/list\?/);
+        await page.route(/\/api\/attendance\/list\?/, (route) => route.fulfill({ json: {
+            status: 'open', simulated: true, sessionId: null, title: lessonTitle,
+            lessonStart: lessonDate + 'T09:15:00.000Z', lessonEnd: lessonDate + 'T10:45:00.000Z',
+            room: 'WI WI1- 313', group: 'L7', lecturerDisplayName: 'Prowadzący Testowy',
+            generatedAt: new Date().toISOString(), students: [], totalPresent: 0,
+        } }));
+        await page.getByRole('button', { name: /Warsztat danych/ }).click();
+        await page.getByRole('button', { name: 'Panel obecności', exact: true }).click();
+        const previewList = page.getByRole('dialog', { name: 'Lista obecności' });
+        await previewList.getByText('Symulacja Kantecha', { exact: true }).waitFor();
+        await previewList.getByText('Lista otwarta', { exact: true }).waitFor();
+        await previewList.getByText('Brak wpisów.', { exact: true }).waitFor();
+        const simulatedFile = page.waitForEvent('download');
+        await previewList.getByRole('button', { name: 'Pobierz XLSX' }).click();
+        const simulatedDownload = await simulatedFile;
+        assert.match(simulatedDownload.suggestedFilename(), /^obecnosci-symulacja-357162-.*\.xlsx$/);
+        const simulatedContent = await readFile(await simulatedDownload.path());
+        assert.ok(simulatedContent.includes(Buffer.from('Lista otwarta · Symulacja Kantecha')));
+        assert.ok(simulatedContent.includes(Buffer.from('Godzina odbicia')));
+        assert.ok(simulatedContent.includes(Buffer.from('20 listopada 2026 · 10:15–11:45')));
+        assert.ok(simulatedContent.includes(Buffer.from(lessonTitle)));
+        assert.ok(simulatedContent.includes(Buffer.from('WI WI1- 313')));
+        assert.ok(simulatedContent.includes(Buffer.from('L7')));
+        assert.ok(simulatedContent.includes(Buffer.from('Prowadzący Testowy')));
         await page.goto(url + '/adminpanel/kantech?view=readers');
-        const inventory = page.getByRole('complementary', { name: 'Czytniki w SmartService' });
-        const inventoryDoor = (id) => inventory.getByRole('listitem').filter({ hasText: id });
-        await inventoryDoor('49919').getByText('Online', { exact: true }).waitFor();
-        await inventoryDoor('49888').getByText('Offline', { exact: true }).waitFor();
-        await inventoryDoor('49889').getByText('Wyłączony', { exact: true }).waitFor();
-        await inventoryDoor('49890').getByText('Brak stanu', { exact: true }).waitFor();
+        const rcpGroups = page.getByRole('region', { name: 'Grupy urządzeń RCP' });
+        await rcpGroups.getByRole('button', { name: 'Dodaj grupę' }).click();
+        await rcpGroups.getByLabel('Nazwa grupy').fill('Konfiguracja testowa');
+        await rcpGroups.getByLabel('Urządzenie ze SmartService').selectOption('RCP-04@01.04');
+        await rcpGroups.getByRole('button', { name: 'Dodaj urządzenie' }).click();
+        assert.equal(await rcpGroups.getByLabel('Rola czytnika 49701').inputValue(), 'ENTRY');
+        assert.equal(await rcpGroups.getByLabel('Rola czytnika 49702').inputValue(), 'EXIT');
+        assert.equal(await page.getByRole('button', { name: 'Dodaj czytniki', exact: true }).count(), 0);
+        assert.equal(await page.getByRole('heading', { name: 'Czytniki poza grupami' }).count(), 0);
+        assert.equal(await page.getByRole('heading', { name: 'Czytniki w SmartService' }).count(), 0);
+        await rcpGroups.getByRole('button', { name: 'Zapisz grupę' }).click();
+        const configuredGroup = rcpGroups.getByRole('listitem').filter({ hasText: 'Konfiguracja testowa' });
+        const connected = configuredGroup.getByText('Połączony', { exact: true });
+        await connected.nth(1).waitFor();
         await page.setViewportSize({ width: 1440, height: 900 });
-        const addReaders = page.getByRole('button', { name: 'Dodaj czytniki', exact: true });
-        const readerForm = page.getByRole('region', { name: 'Dodaj czytniki' });
-        await readerForm.waitFor({ state: 'hidden' });
-        await addReaders.click();
-        await readerForm.waitFor();
-        assert.ok((await inventory.boundingBox()).x > (await readerForm.boundingBox()).x);
+        await configuredGroup.getByText('Wejście 49701', { exact: false }).waitFor();
+        if (screenshots) await page.screenshot({
+            path: join(screenshots, 'kantech-readers-desktop.png'), animations: 'disabled',
+        });
         await page.setViewportSize({ width: 390, height: 780 });
-        assert.ok((await inventory.boundingBox()).y > (await readerForm.boundingBox()).y);
+        await configuredGroup.getByText('Wyjście 49702', { exact: false }).waitFor();
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
-        await page.setViewportSize({ width: 1200, height: 780 });
-        await page.getByLabel('ID wejścia').fill('49998');
-        await page.getByLabel('Nazwa wejścia').fill('Testowe wejście');
-        await page.getByLabel('ID wyjścia').fill('49997');
-        await page.getByLabel('Nazwa wyjścia').fill('Testowe wyjście');
-        await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
-        await page.getByText('Zapisano parę 49998 → 49997.').waitFor();
-        await readerForm.waitFor({ state: 'hidden' });
-        const pair = page.getByRole('list', { name: 'Zapisane czytniki' }).getByRole('listitem')
-            .filter({ hasText: '49998' });
-        await pair.getByText('→', { exact: true }).waitFor();
-        assert.match(await pair.textContent(), /Wejście.*49998.*→.*Wyjście.*49997/);
-        await page.getByRole('button', { name: 'Edytuj parę 49998 i 49997' }).click();
-        assert.equal(await page.getByLabel('ID wejścia').inputValue(), '49998');
-        await page.getByLabel('Budynek').fill('TEST');
-        await page.getByLabel('Sala', { exact: true }).fill('401');
-        await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
-        await page.getByText('TEST / 401', { exact: false }).first().waitFor();
-
-        await addReaders.click();
-        await page.getByLabel('Jeden czytnik obsługuje wejście i wyjście').check();
-        await page.getByLabel('ID wyjścia').waitFor({ state: 'hidden' });
-        await page.getByLabel('ID wejścia').fill('49995');
-        await page.getByLabel('Nazwa wejścia').fill('Czytnik dwukierunkowy');
-        await page.getByRole('button', { name: 'Zapisz konfigurację' }).click();
-        await page.getByText('Zapisano czytnik 49995 jako wejście i wyjście.').waitFor();
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'kantech-readers-mobile.png') });
+        try {
+            assert.ok((await request(simulator + '/test/availability', { json: { reader: false } })).ok);
+            await configuredGroup.getByText('Niedostępny', { exact: true }).nth(1).waitFor();
+        } finally {
+            assert.ok((await request(simulator + '/test/availability', { json: { reader: true } })).ok);
+        }
+        await connected.nth(1).waitFor();
         page.once('dialog', (dialog) => dialog.accept());
-        await page.getByRole('button', { name: 'Usuń czytnik 49995' }).click();
-        await page.getByText('Usunięto czytnik 49995.').waitFor();
-        page.once('dialog', (dialog) => dialog.accept());
-        await page.getByRole('button', { name: 'Usuń czytnik 49998' }).click();
-        await page.getByText('Usunięto czytnik 49998.').waitFor();
-        await pair.waitFor({ state: 'hidden' });
-        page.once('dialog', (dialog) => dialog.accept());
-        await page.getByRole('button', { name: 'Usuń czytnik 49997' }).click();
-        await page.getByText('Usunięto czytnik 49997.').waitFor();
+        await configuredGroup.getByRole('button', { name: 'Usuń grupę' }).click();
+        await rcpGroups.getByText('Konfiguracja testowa', { exact: true }).waitFor({ state: 'hidden' });
 
         await page.setViewportSize({ width: 1366, height: 800 });
         await page.getByRole('link', { name: 'Logi', exact: true }).click();
         await page.getByRole('heading', { name: 'Logi', exact: true }).waitFor();
         const audit = '/api/audit?limit=50';
-        const beforeSearch = await waitFor('reader deletion in audit', async () => {
+        const beforeSearch = await waitFor('group deletion in audit', async () => {
             const { entries } = await (await page.request.get(url + audit)).json();
-            return entries[0]?.target === '49997' && entries[0].action === 'Usunięto czytnik' && entries[0].id;
+            return entries[0]?.action === 'Usunięto grupę urządzeń RCP' && entries[0].id;
         });
         assert.ok((await page.request.get(url + '/schedule.php?kind=teacher&query=Prowadzacy')).ok());
         const afterSearch = await (await page.request.get(url + audit)).json();
@@ -299,8 +383,15 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByLabel('Obszar').selectOption('AUTH');
         await page.getByRole('cell', { name: 'Zalogowano się', exact: true }).first().waitFor();
         await page.setViewportSize({ width: 390, height: 720 });
+        await page.getByRole('button', { name: 'Rozwiń sekcję Przechowywanie logów' }).click();
         assert.ok(await page.getByLabel('Okres przechowywania w dniach').isVisible());
+        await page.getByRole('button', { name: 'Zwiń sekcję Przechowywanie logów' }).click();
         assert.ok(await page.getByRole('table', { name: 'Dziennik działań w PlanQR' }).isVisible());
+        const logWrapper = page.locator('.admin-audit .admin-table__wrapper');
+        for (const width of [320, 390, 2560, 3840]) {
+            await page.setViewportSize({ width, height: width > 1000 ? 1440 : 720 });
+            assert.ok(await logWrapper.evaluate((element) => element.scrollWidth <= element.clientWidth + 1));
+        }
         console.log('Browser monitor, LDAP session, XLSX download and audit filters passed.');
     } finally {
         await browser.close();
@@ -352,6 +443,8 @@ async function main() {
         try {
             await seeded.query('INSERT INTO admins (id, username, "updatedAt") VALUES ($1, $2, NOW())',
                 ['fixture-admin', 'pilot-admin']);
+            await seeded.query(`INSERT INTO ldap_users (username, display_name, given_name, surname, title)
+                VALUES ($1, $2, $3, $4, 'student')`, ['s123456', 'Żak Łucja', 'Łucja', 'Żak']);
         } finally {
             await seeded.end();
         }
@@ -438,12 +531,8 @@ async function main() {
         assert.equal((await request(api + '/api/kantech/events', { headers: service, json: {} })).status, 401);
         const newReader = { id: '49999', label: 'Czytnik dodany ręcznie' };
         assert.equal((await request(readersApi, { headers: authenticatedLecturer, json: newReader })).status, 403);
-        assert.equal((await request(readersApi, { headers, json: { ...newReader, buildingId: 'WI1' } })).status, 200);
-        assert.equal((await request(readersApi, { headers, json: newReader })).status, 200);
-        await waitFor('new reader polled without restarting the worker', async () =>
-            (await live()).readers.some(({ id, state }) => id === newReader.id && state === 'connected'));
-        assert.equal((await request(readersApi + '/' + newReader.id, { headers, method: 'DELETE' })).status, 204);
-        assert.ok(!(await live()).readers.some(({ id }) => id === newReader.id));
+        assert.equal((await request(readersApi, { headers, json: newReader })).status, 404);
+        assert.equal((await request(readersApi + '/setup', { headers, json: {} })).status, 404);
         const bearer = { Authorization: 'Bearer ' + headers.Cookie.slice('jwt='.length) };
         assert.equal((await request(api + '/api/kantech/events', {
             headers: bearer, json: { readerId: '49920', alias: 'WISYNC_2', occurredAt: at(-100), granted: true },
@@ -486,6 +575,29 @@ async function main() {
         assert.ok([...plan.current, ...plan.upcoming].some((item) => item.id === '9001'));
         assert.equal((await request(dev + '/scans', { headers, method: 'DELETE' })).status, 204);
         assert.equal((await (await request(dev, { headers })).json()).simulated.length, 0);
+        const upcoming = [...plan.current, ...plan.upcoming].find(({ id }) => id === '9001');
+        const simulatePlan = async (alias, readerId) => (await request(dev + '/scans', {
+            headers, json: { readerId, deviceId: 'RCP-04@01.04', alias, source: 'live' },
+        })).json();
+        const previewUrl = api + '/api/attendance/list?' + new URLSearchParams({
+            lesson_id: upcoming.id, from: upcoming.start, teacher: 'Testowy Prowadzący',
+        });
+        assert.equal((await simulatePlan('WISYNC_1', '49701'))[0].outcome, 'opened');
+        assert.equal((await simulatePlan('s012345', '49702'))[0].outcome, 'recorded');
+        const previewList = await (await request(previewUrl, { headers })).json();
+        assert.equal(previewList.simulated, true);
+        assert.equal(previewList.sessionId, null);
+        assert.equal(previewList.lessonStart, upcoming.start);
+        assert.equal(previewList.lessonEnd, upcoming.end);
+        assert.equal(previewList.status, 'open');
+        assert.deepEqual(previewList.students.map(({ username }) => username), ['s012345']);
+        assert.equal((await request(previewUrl + '&session_id=987654', { headers })).status, 404);
+        assert.equal((await request(previewUrl, { headers: root })).status, 404);
+        assert.equal((await list(9001)).status, 404);
+        assert.equal((await simulatePlan('WISYNC_1', '49702'))[0].outcome, 'closed');
+        assert.equal((await (await request(previewUrl, { headers })).json()).status, 'closed');
+        assert.equal((await request(dev + '/scans', { headers, method: 'DELETE' })).status, 204);
+        assert.equal((await request(previewUrl, { headers })).status, 404);
         console.log('Observation mode, real login, admin-only monitor and worker authentication passed.');
         await Promise.all([stop(server), stop(worker)]);
 
@@ -494,13 +606,39 @@ async function main() {
             _building_id: 'TEST', _room_number: roomNumber, start: at(start), end: at(end),
         });
         assert.ok((await request(simulator + '/test/schedule', {
-            json: [event(9000, -10_800, -10_000), event(9001, -600, 1_800), event(9002, 300, 2_400, '202'),
+            json: [event(9000, -10_800, -8_100), event(9001, -600, 2_100), event(9002, 300, 2_400, '202'),
                 event(9003, 600, 2_700, '202')],
         })).ok);
         await request(simulator + '/test/availability', { json: { schedule: false } });
         server = startBackend('attendance');
         worker = launch('dist/attendance/worker.js', buttons.worker);
         headers = await authenticate();
+        await emit('WISYNC_1', at(-2_402));
+        await waitFor('ungrouped entry cannot start a list', async () => (await live()).events.some(
+            ({ readerId, occurredAt, outcome }) => readerId === '49919' && occurredAt === at(-2_402) && outcome === 'reader_without_group'));
+        assert.equal((await list(9001)).status, 404);
+        const groupsUrl = readersApi + '/groups';
+        const fixturePairs = [['49919', '49921'], ['49920', '49922']];
+        const fixtureDevices = fixturePairs.map((ids, index) => ({
+            id: 'RCP-' + (21 + index) + '@01.0' + (index + 1),
+            readers: ids.map((id, port) => ({ id, role: port === 0 ? 'ENTRY' : 'EXIT' })),
+        }));
+        const supplementalDoors = fixturePairs.flatMap((ids, index) => ids.map((id, port) => ({
+            id, label: `(01.0${index + 1}.${port + 1}) RCP${index + 21}-Test${port === 1 ? ' - Exit' : ''}`,
+            state: 'online',
+        })));
+        assert.equal((await request(inventoryIngress, {
+            headers: service, json: [
+                ...inventory.readers.filter(({ id }) => !fixturePairs.flat().includes(id)),
+                ...supplementalDoors,
+            ],
+        })).status, 204);
+        const fixtureGroups = [];
+        for (const device of fixtureDevices) {
+            const response = await request(groupsUrl, { headers, json: { name: device.id, devices: [device] } });
+            assert.equal(response.status, 201);
+            fixtureGroups.push((await response.json()).id);
+        }
         await emit('WISYNC_1', at(-2_401));
         await emit('WISYNC_1', at(-2_400));
         await emit('WISYNC_2', at(-400));
@@ -534,8 +672,8 @@ async function main() {
         await emit('WISYNC_1', at(-120));
         await emit('WISYNC_1', at(-110), '49922');
         await emit('WISYNC_2', at(-100), '49921');
-        await waitFor('wrong exit and student exit leave the list open', async () => (await live()).events.some(
-            (item) => item.readerId === '49921' && item.label === 'WISYNC_2' && item.outcome === 'exit_ignored'));
+        await waitFor('repeated student tap on the exit does not duplicate attendance', async () => (await live()).events.some(
+            (item) => item.readerId === '49921' && item.label === 'WISYNC_2' && item.outcome === 'repeat_tap'));
         assert.equal((await (await list(9001)).json()).status, 'open');
         await emit('WISYNC_1', at(-90), '49921');
         await waitFor('late closing tap corrects membership', async () => {
@@ -739,7 +877,7 @@ async function main() {
             const preview = api + '/api/attendance/list?lesson_id=9100&teacher=' + encodeURIComponent('Łądź Alicja');
             assert.equal((await request(preview, { headers })).status, 200);
             assert.equal((await request(preview, { headers: lecturer })).status, 403);
-            assert.equal((await request(readersApi + '/49921', { method: 'DELETE', headers })).status, 409);
+            assert.equal((await request(groupsUrl + '/' + fixtureGroups[0], { method: 'DELETE', headers })).status, 409);
             const fallbackHeaders = credentials('jzolc', 'teacher');
             const fallback = await waitFor('Plan ZUT directory resolves Żółć without a cached LDAP profile', async () => {
                 const response = await list(9200, fallbackHeaders);
@@ -765,17 +903,12 @@ async function main() {
         }
         console.log('Restricted PostgreSQL worker, SQL readings during API downtime, deduplication and attendance recovery passed.');
 
-        const singleReader = { id: '49996', label: 'TEST 403' };
-        const setup = { entry: singleReader };
-        const setupUrl = readersApi + '/setup';
-        assert.equal((await request(setupUrl, { headers, json: { ...setup, exit: singleReader } })).status, 400);
-        assert.equal((await request(setupUrl, {
-            headers, json: { ...setup, exit: { id: '49921', label: 'Istniejące wyjście' } },
-        })).status, 409);
-        assert.ok(!(await (await request(readersApi, { headers })).json()).readers.some(({ id }) => id === singleReader.id));
-        const single = await request(setupUrl, { headers, json: { ...setup, exit: null } });
+        const singleReader = { id: '49701' };
+        const single = await request(groupsUrl, { headers, json: { name: 'Czytnik dwukierunkowy w grupie', devices: [{
+            id: 'RCP-04@01.04', readers: [{ id: singleReader.id, role: 'BOTH' }, { id: '49702', role: 'EXIT' }],
+        }] } });
         assert.equal(single.status, 201);
-        assert.equal((await single.json()).singleReader, true);
+        const singleGroup = await single.json();
         assert.ok((await request(simulator + '/test/schedule', { json: [event(9300, -300, 2_100, '403')] })).ok);
         await emit('WISYNC_1', at(-100), singleReader.id);
         await emit('s054321', at(-95), singleReader.id);
@@ -794,7 +927,80 @@ async function main() {
         assert.equal(singleClosed.closedAt, at(-40));
         assert.equal(singleClosed.students[0].username, 's054321');
         assert.equal(singleClosed.students[0].albumNumber, '054321');
-        console.log('Atomic reader setup and single-reader closing threshold passed.');
+        assert.equal((await request(groupsUrl + '/' + singleGroup.id, { method: 'DELETE', headers })).status, 204);
+        console.log('Group configuration and bidirectional reader closing threshold passed.');
+
+        assert.equal((await request(groupsUrl)).status, 401);
+        assert.equal((await request(groupsUrl, { headers: lecturer })).status, 403);
+        const groupSnapshot = await (await request(groupsUrl, { headers })).json();
+        const devices = groupSnapshot.devices.map(({ id, readers }) => ({
+            id, readers: readers.map(({ id, label }) => ({ id, role: /Exit$/.test(label) ? 'EXIT' : 'ENTRY' })),
+        }));
+        assert.deepEqual(devices.map(({ id }) => id), ['RCP-04@01.04', 'RCP-05@01.05']);
+        const nameOfGroup = 'Sala testowa RCP';
+        const group = await request(groupsUrl, { headers, json: { name: nameOfGroup, devices: devices.slice(0, 1) } });
+        assert.equal(group.status, 201);
+        const { id: groupId } = await group.json();
+        assert.equal((await request(groupsUrl, { headers, json: { id: groupId, name: nameOfGroup, devices } })).status, 200);
+        assert.equal((await request(groupsUrl, { headers, json: { name: 'Duplikat', devices: devices.slice(1) } })).status, 409);
+        assert.equal((await request(readersApi + '/49701', { method: 'DELETE', headers })).status, 404);
+
+        assert.ok((await request(simulator + '/test/schedule', { json: [event(9450, -650, 2_100)] })).ok);
+        await emit('WISYNC_1', at(-500), '49701');
+        await emit('s123456', at(-490), '49702');
+        await emit('WISYNC_2', at(-485), '49703');
+        await emit('WISYNC_4', at(-480), '49704');
+        const groupList = await waitFor('two RCP units share a list and a lecturer can join through an exit', async () => {
+            const response = await list(9450);
+            if (!response.ok) return;
+            const value = await response.json();
+            return value.totalPresent === 2 && value;
+        });
+        assert.equal(groupList.readerGroup, true);
+        assert.equal(groupList.status, 'open');
+        assert.equal(groupList.doorId, '49701');
+        assert.deepEqual(groupList.students.map(({ username, givenName, surname, albumNumber }) =>
+            [username, givenName, surname, albumNumber]), [['s123456', 'Łucja', 'Żak', '123456'], ['lecturer-two', 'Testowy', 'Drugi', '']]);
+        assert.equal((await request(groupsUrl + '/' + groupId, { method: 'DELETE', headers })).status, 409);
+        assert.equal((await request(api + '/api/attendance/sessions/' + groupList.sessionId + '/close', { headers, json: {} })).status, 409);
+        await emit('WISYNC_1', at(-460), '49703');
+        await emit('WISYNC_1', at(-450), '49704');
+        const groupClosed = await waitFor('opening lecturer closes at the other RCP exit', async () => {
+            const value = await (await list(9450)).json();
+            return value.status === 'closed' && value;
+        });
+        assert.equal(groupClosed.closedAt, at(-450));
+        assert.equal(groupClosed.totalPresent, 2);
+        const campusDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Warsaw', dateStyle: 'short' })
+            .format(new Date(at(-490)));
+        const eventFilters = new URLSearchParams({
+            deviceId: 'RCP-04@01.04', readerId: '49702', search: 'S123456',
+            from: campusDay, to: campusDay, outcome: 'recorded', limit: '1',
+        });
+        const eventUrl = api + '/api/kantech/events?';
+        const filteredReadings = await (await request(eventUrl + eventFilters, { headers })).json();
+        assert.deepEqual(filteredReadings.events.map(({ label, deviceId, readerId, role }) =>
+            [label, deviceId, readerId, role]), [['s123456', 'RCP-04@01.04', '49702', 'EXIT']]);
+        eventFilters.set('deviceId', 'RCP-05@01.05');
+        assert.deepEqual((await (await request(eventUrl + eventFilters, { headers })).json()).events, []);
+        assert.equal((await request(eventUrl + 'from=2026-03-30&to=2026-03-29', { headers })).status, 400);
+
+        assert.ok((await request(simulator + '/test/schedule', { json: [event(9451, -360, 1_690)] })).ok);
+        await emit('WISYNC_1', at(-350), '49703');
+        await emit('s123456', at(-111), '49704');
+        await emit('s22222', at(-110), '49701');
+        await emit('WISYNC_1', at(-95), '49701');
+        const expired = await waitFor('attendance stops at the automatic deadline', async () => {
+            const response = await list(9451);
+            if (!response.ok) return;
+            const value = await response.json();
+            return value.status === 'closed' && value.totalPresent === 1 && value;
+        });
+        assert.equal(expired.closedAt, at(-110));
+        assert.deepEqual(expired.students.map(({ username }) => username), ['s123456']);
+        assert.ok((await live()).events.some(({ label, outcome }) => label === 's22222' && outcome === 'no_session'));
+        assert.equal((await request(groupsUrl + '/' + groupId, { method: 'DELETE', headers })).status, 204);
+        console.log('RCP discovery and configuration, shared attendance, LDAP names, owner-only close and automatic deadline passed.');
 
         await stop(server);
         server = startBackend('observe');
@@ -812,16 +1018,8 @@ async function main() {
         assert.equal((await live()).mode, 'attendance');
         const cutover = Date.parse(activeFrom);
         const aroundSwitch = (offset) => new Date(cutover + offset).toISOString();
-        assert.equal((await request(setupUrl, { headers, json: {
-            entry: { id: '49919', label: 'Wejście 129' }, exit: { id: '49921', label: 'Wyjście 129' },
-            buildingId: 'W1', roomNumber: '129', edit: true,
-        } })).status, 200);
-        assert.equal((await request(setupUrl, { headers, json: {
-            entry: { id: '49920', label: 'Drugie wejście' }, exit: { id: '49922', label: 'Drugie wyjście' },
-            buildingId: 'W1', roomNumber: '129', edit: true,
-        } })).status, 200);
         const fixtureRoom = {
-            ...event(9400, -300, 1_800, '129'), start: aroundSwitch(-60_000), end: aroundSwitch(1_800_000),
+            ...event(9400, -300, 3_600, '129'), start: aroundSwitch(-60_000), end: aroundSwitch(3_600_000),
             _building_id: 'WI_WI2', _room_number: '306', room: 'WI WI2- 306',
         };
         assert.ok((await request(simulator + '/test/schedule', {
@@ -861,10 +1059,12 @@ async function main() {
         await legacyDb.connect();
         try {
             await legacyDb.query('BEGIN');
-            await legacyDb.query('UPDATE "AttendanceScan" SET "roomKey" = $1 WHERE "roomKey" = $2 AND "occurredAt" >= $3',
-                [legacyScope, 'reader:49919', activeFrom]);
-            await legacyDb.query('UPDATE "AttendanceSession" SET "roomKey" = $1, key = $2 WHERE id = $3',
+            await legacyDb.query('UPDATE "AttendanceScan" SET "roomKey" = $1, "exitReaderId" = $4 WHERE "roomKey" = $2 AND "occurredAt" >= $3',
+                [legacyScope, 'group:' + fixtureGroups[0], activeFrom, '49921']);
+            await legacyDb.query(`UPDATE "AttendanceSession" SET "roomKey" = $1, key = $2, "exitReaderId" = '49921' WHERE id = $3`,
                 [legacyScope, JSON.stringify([legacyScope, 'pilot-admin', JSON.stringify(['9400', fixtureRoom.start])]), moved.sessionId]);
+            await legacyDb.query(`UPDATE "AttendanceReader" SET "groupId" = NULL, "deviceId" = NULL,
+                "exitReaderId" = CASE WHEN id = '49919' THEN '49921' END WHERE "groupId" = $1`, [fixtureGroups[0]]);
             await legacyDb.query('COMMIT');
         } finally {
             await legacyDb.end();
@@ -884,17 +1084,17 @@ async function main() {
         assert.equal((await live()).mode, 'observe');
         console.log('LDAP mode switch, capture cutover, and HTTP and PostgreSQL reports passed without a restart.');
 
-        for (const id of ['49919', '49920', '49921', '49922', singleReader.id]) {
-            assert.equal((await request(readersApi + '/' + id, { headers, method: 'DELETE' })).status, 204);
+        for (const id of fixtureGroups) {
+            assert.equal((await request(groupsUrl + '/' + id, { headers, method: 'DELETE' })).status, 204);
         }
         await stop(server);
         server = startBackend('attendance');
         headers = await authenticate();
         assert.equal((await live()).mode, 'observe');
-        assert.deepEqual((await (await request(workerReaders, { headers: service })).json()).readerIds, []);
+        assert.deepEqual((await (await request(groupsUrl, { headers })).json()).groups, []);
         assert.equal((await list(9001)).status, 200);
         assert.equal((await events('?limit=1')).retentionDays, 7);
-        console.log('Reader changes reach the worker, deletions survive restart and attendance history remains available.');
+        console.log('Group deletions survive restart and attendance history remains available.');
     } finally {
         await Promise.all([...processes].map(stop));
         if (created) await sql.query('DROP DATABASE ' + name + ' WITH (FORCE)');

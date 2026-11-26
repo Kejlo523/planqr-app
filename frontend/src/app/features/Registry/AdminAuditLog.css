@@ -32,7 +32,9 @@
 .admin-audit__pagination span { margin-right: auto; color: var(--admin-text-muted); font-size: .85rem; }
 
 @media (max-width: 720px) {
+  .admin-audit__journal > .admin-surface__header { align-items: center; }
+  .admin-audit__journal .admin-section__actions { width: auto; }
   .admin-audit__retention > label { flex: 1 1 10rem; }
   .admin-audit__filters > label { flex: 1 1 9rem; min-width: 0; }
-  .admin-audit .admin-table { min-width: 38rem; }
+  .admin-audit .admin-table time { white-space: normal; }
 }

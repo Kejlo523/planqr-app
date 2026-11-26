@@ -62,7 +62,7 @@
 .login-panel__form {
   align-self: center;
   justify-self: center;
-  width: min(100%, 24rem);
+  width: min(100%, clamp(24rem, 22vw, 32rem));
   display: grid;
   gap: 1.25rem;
   padding-block: 2rem 3rem;
@@ -104,7 +104,7 @@
   color: #fff;
   font-weight: 600;
 }
-.login-panel__btn:hover { background: var(--pq-accent-hover); border-color: transparent; }
+.login-panel__btn:hover { background: var(--pq-accent-hover); border-color: transparent; color: #fff; }
 .login-panel__btn:disabled { opacity: .75; cursor: wait; }
 .login-panel__form .login-panel__error {
   margin: 0;
@@ -113,12 +113,34 @@
   background: var(--pq-accent-soft);
   color: var(--pq-accent-text);
 }
-.login-panel :focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 3px; }
+.login-panel :focus-visible,
+.access-denied :focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 3px; }
+
+.access-denied {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: var(--pq-canvas);
+  color: var(--pq-ink);
+}
+.access-denied > section {
+  display: grid;
+  justify-items: start;
+  gap: .9rem;
+  width: min(100%, 30rem);
+  padding: clamp(1rem, 4vw, 2rem);
+  border: 1px solid var(--pq-line);
+  border-radius: 8px;
+  background: var(--pq-surface);
+}
+.access-denied h1 { font: 600 clamp(2rem, 5vw, 2.65rem)/1.1 var(--pq-heading); }
+.access-denied p { color: var(--pq-muted); }
 
 @media (max-width: 680px) {
   .login-panel { grid-template-columns: 1fr; grid-template-rows: auto auto; align-content: start; }
   .login-panel__workspace { grid-row: 1; }
-  .login-panel__form { justify-self: start; }
+  .login-panel__form { padding-block: 1.5rem 2rem; }
   .login-panel__introduction { padding: 1.2rem; gap: .8rem; }
   .login-panel__statement { display: none; }
   .login-panel__institution { border: 0; padding: 0; max-width: 26rem; }

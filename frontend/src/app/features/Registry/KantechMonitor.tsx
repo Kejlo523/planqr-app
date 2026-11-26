@@ -21,7 +21,6 @@ interface Snapshot {
   devTools?: boolean;
   devices: KantechDevice[];
   readerIds: string[];
-  readers: ({ id: string; state: "connected" | "unavailable"; checkedAt: string } & ReaderDetails)[];
   events: ({
     key: string;
     readerId: string;
@@ -55,6 +54,7 @@ function KantechLiveMonitor() {
   const [error, setError] = useState(false);
   const [forbidden, setForbidden] = useState(false);
   const [filters, setFilters] = useState(initialFilters);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [loadedQuery, setLoadedQuery] = useState<string>();
   const [savingMode, setSavingMode] = useState(false);
   const [modeError, setModeError] = useState("");
@@ -63,6 +63,8 @@ function KantechLiveMonitor() {
   const query = new URLSearchParams(Object.entries(filters).map(([key, value]) =>
     [key, value.trim()]).filter(([, value]) => value)).toString();
   const filtering = Object.entries(filters).some(([key, value]) => key !== "limit" && value);
+  const advancedFilterCount = [filters.deviceId, filters.readerId, filters.from, filters.to, filters.outcome]
+    .filter(Boolean).length;
 
   useEffect(() => {
     if (invalidRange) return;
@@ -166,64 +168,61 @@ function KantechLiveMonitor() {
         {modeError && <p role="alert" className="kantech-monitor__error">{modeError}</p>}
         {error && <p role="alert" className="kantech-monitor__error">Podgląd chwilowo niedostępny. Ponawiam połączenie.</p>}
         {forbidden && <p role="alert" className="kantech-monitor__error">Zaloguj się przez LDAP na konto administratora.</p>}
-        <section className="kantech-monitor__readers" aria-label="Stan czytników">
-          {snapshot?.readers.length ? snapshot.readers.map((item) => {
-            const stale = Date.now() - Date.parse(item.checkedAt) > 25_000;
-            const online = !error && !stale && item.state === "connected";
-            return (
-              <div className="kantech-monitor__reader" key={item.id} data-online={online}>
-                <strong>{item.deviceId ? rcpDeviceName(item.deviceId) : "Czytnik"} <span className="kantech-monitor__mono">{item.id}</span></strong>
-                <span>{online ? "Połączony" : stale || error ? "Brak aktualnego statusu" : "Niedostępny"}</span>
-              </div>
-            );
-          }) : <p>Oczekiwanie na pierwszy sygnał z czytnika.</p>}
-        </section>
         <section className="kantech-monitor__feed" aria-labelledby="kantech-feed">
           <div className="kantech-monitor__feed-header">
             <h2 id="kantech-feed">Ostatnie odbicia</h2>
             {!updating && !invalidRange && snapshot && <span>Wyświetlono {events.length}</span>}
           </div>
-          <div className="kantech-monitor__filters" aria-label="Filtry odbić" role="group">
-            <label>Szukaj odbić
-              <input type="search" placeholder="Karta, RCP lub czytnik" value={filters.search} maxLength={128}
-                onChange={(event) => updateFilter("search", event.target.value)} />
-            </label>
-            <label><span id="kantech-filter-device">RCP</span>
-              <select aria-labelledby="kantech-filter-device" value={filters.deviceId} onChange={(event) =>
-                setFilters((current) => ({ ...current, deviceId: event.target.value, readerId: "" }))}>
-                <option value="">Wszystkie urządzenia</option>
-                {snapshot?.devices.map(({ id }) => <option key={id} value={id}>{rcpDeviceName(id)}</option>)}
-              </select>
-            </label>
-            <label><span id="kantech-filter-reader">Czytnik</span>
-              <select aria-labelledby="kantech-filter-reader" value={filters.readerId} onChange={(event) => updateFilter("readerId", event.target.value)}>
-                <option value="">Wszystkie czytniki</option>
-                {[...readerOptions].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-              </select>
-            </label>
-            <label>Od dnia
-              <input type="date" value={filters.from} onChange={(event) => updateFilter("from", event.target.value)} />
-            </label>
-            <label>Do dnia
-              <input type="date" value={filters.to} onChange={(event) => updateFilter("to", event.target.value)} />
-            </label>
-            <label><span id="kantech-filter-outcome">Wynik</span>
-              <select aria-labelledby="kantech-filter-outcome" value={filters.outcome} onChange={(event) => updateFilter("outcome", event.target.value)}>
-                <option value="">Wszystkie wyniki</option>
-                {Object.entries(outcomeLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <label>Liczba wyników
-              <select value={filters.limit} onChange={(event) => updateFilter("limit", event.target.value)}>
-                {resultLimits.map((limit) => <option key={limit} value={limit}>{limit}</option>)}
-              </select>
-            </label>
-            <button type="button" className="admin-button admin-button--ghost" disabled={!filtering}
-              onClick={() => setFilters({ ...initialFilters, limit: filters.limit })}>Wyczyść filtry</button>
+          <div className="kantech-monitor__filters" aria-label="Filtry odbić" role="group" data-mobile-open={mobileFiltersOpen}>
+            <div className="kantech-monitor__filter-quick">
+              <label>Szukaj odbić
+                <input type="search" placeholder="Karta, RCP lub czytnik" value={filters.search} maxLength={128}
+                  onChange={(event) => updateFilter("search", event.target.value)} />
+              </label>
+              <button type="button" className="admin-button admin-button--secondary kantech-monitor__filter-toggle"
+                aria-expanded={mobileFiltersOpen} aria-controls="kantech-extra-filters"
+                onClick={() => setMobileFiltersOpen((open) => !open)}>
+                Filtry{advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ""}
+              </button>
+            </div>
+            <div id="kantech-extra-filters" className="kantech-monitor__filter-options">
+              <label><span id="kantech-filter-device">RCP</span>
+                <select aria-labelledby="kantech-filter-device" value={filters.deviceId} onChange={(event) =>
+                  setFilters((current) => ({ ...current, deviceId: event.target.value, readerId: "" }))}>
+                  <option value="">Wszystkie urządzenia</option>
+                  {snapshot?.devices.map(({ id }) => <option key={id} value={id}>{rcpDeviceName(id)}</option>)}
+                </select>
+              </label>
+              <label><span id="kantech-filter-reader">Czytnik</span>
+                <select aria-labelledby="kantech-filter-reader" value={filters.readerId} onChange={(event) => updateFilter("readerId", event.target.value)}>
+                  <option value="">Wszystkie czytniki</option>
+                  {[...readerOptions].map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                </select>
+              </label>
+              <label>Od dnia
+                <input type="date" value={filters.from} onChange={(event) => updateFilter("from", event.target.value)} />
+              </label>
+              <label>Do dnia
+                <input type="date" value={filters.to} onChange={(event) => updateFilter("to", event.target.value)} />
+              </label>
+              <label><span id="kantech-filter-outcome">Wynik</span>
+                <select aria-labelledby="kantech-filter-outcome" value={filters.outcome} onChange={(event) => updateFilter("outcome", event.target.value)}>
+                  <option value="">Wszystkie wyniki</option>
+                  {Object.entries(outcomeLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>Liczba wyników
+                <select value={filters.limit} onChange={(event) => updateFilter("limit", event.target.value)}>
+                  {resultLimits.map((limit) => <option key={limit} value={limit}>{limit}</option>)}
+                </select>
+              </label>
+              <button type="button" className="admin-button admin-button--ghost" disabled={!filtering}
+                onClick={() => setFilters({ ...initialFilters, limit: filters.limit })}>Wyczyść filtry</button>
+            </div>
           </div>
           {invalidRange ? <p className="kantech-monitor__empty" role="alert">Data końcowa musi przypadać w dniu początkowym lub później.</p>
             : updating ? <p className="kantech-monitor__empty" role="status">Pobieranie odbić…</p> : events.length ? (
-            <div className="kantech-monitor__scroll" tabIndex={0} aria-label="Tabela odbić kart">
+            <div className="kantech-monitor__scroll" tabIndex={0} aria-label="Tabela odbić kart" role="region">
               <table>
                 <thead><tr><th>Odbicie</th><th>Odebrano</th><th>RCP</th><th>Czytnik</th><th>Karta</th><th>Wynik</th></tr></thead>
                 <tbody>{events.map((event) => (
@@ -235,7 +234,7 @@ function KantechLiveMonitor() {
                       {event.readerId}{event.role && <small>{rcpReaderRoles[event.role]}</small>}
                     </td>
                     <td data-label="Karta" className="kantech-monitor__mono">{event.label}</td>
-                    <td data-label="Wynik">{outcomeLabel[event.outcome] ?? "Odebrano"}</td>
+                    <td data-label="Wynik" data-outcome={event.outcome}>{outcomeLabel[event.outcome] ?? "Odebrano"}</td>
                   </tr>
                 ))}</tbody>
               </table>

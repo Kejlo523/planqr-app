@@ -4824,6 +4824,75 @@ body.admin-console-scroll-root #root {
   font-family: var(--pq-heading);
 }
 
+@media (max-width: 720px) {
+  .admin-devices-view__stats > .admin-surface__header > .admin-section__actions {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .admin-devices-view__stats .admin-section__actions .admin-button { min-width: 0; white-space: normal; }
+}
+
+.admin-table__wrapper:has(.admin-table--compact) {
+  margin: 0;
+  container-type: inline-size;
+  scrollbar-gutter: auto;
+}
+
+@container (max-width: 53rem) {
+  .admin-table--compact {
+    display: block;
+    position: relative;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-table--compact thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .admin-table--compact tbody { display: block; }
+  .admin-table--compact tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .55rem .85rem;
+    padding: .75rem 1rem;
+    border-top: 1px solid var(--admin-border);
+  }
+
+  .admin-table--compact tbody tr td {
+    display: block;
+    min-width: 0;
+    width: auto;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-table--compact tbody tr td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: .15rem;
+    color: var(--admin-text-muted);
+    font-size: .75rem;
+    font-weight: 600;
+  }
+
+  .admin-table--compact tbody tr td:last-child { grid-column: 1 / -1; }
+  .admin-table--compact tbody tr .admin-table__actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    width: auto;
+    margin: 0;
+  }
+}
+
 .admin-console :is(button, a, input, select, textarea, summary):focus-visible {
   outline: 2px solid var(--pq-focus);
   outline-offset: 2px;

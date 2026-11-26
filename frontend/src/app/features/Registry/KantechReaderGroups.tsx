@@ -4,7 +4,7 @@ import { rcpDeviceName as deviceName, rcpReaderRoles as roles, type RcpReaderRol
 type GroupReader = { id: string; label: string | null; role: Role };
 type Device = { id: string; name: string; readers: GroupReader[] };
 type Group = { id: number; name: string; devices: { id: string; readers: GroupReader[] }[] };
-type Snapshot = { groups: Group[]; devices: Device[]; devTools: boolean };
+type Snapshot = { groups: Group[]; devices: Device[]; readerStatuses?: Record<string, string>; devTools: boolean };
 type Draft = Omit<Group, "id"> & { id?: number };
 
 const api = "/api/kantech/readers/groups";
@@ -24,19 +24,31 @@ export function KantechReaderGroups({ onDevToolsChange }: { onDevToolsChange: (e
   const [selected, setSelected] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    void request(api, { signal: controller.signal })
-      .then((response) => response.json())
-      .then((data: Snapshot) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const response = await request(api, { signal: controller.signal });
+        const data: Snapshot = await response.json();
         if (controller.signal.aborted) return;
         setSnapshot(data);
+        setLoadError("");
         onDevToolsChange(data.devTools);
-      })
-      .catch((cause: Error) => { if (!controller.signal.aborted) setError(cause.message); });
-    return () => controller.abort();
+      } catch {
+        if (!controller.signal.aborted) setLoadError("Nie udało się odświeżyć grup i stanu czytników.");
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(() => void refresh(), 5_000);
+      }
+    };
+    void refresh();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [reload, onDevToolsChange]);
 
   const available = snapshot?.devices.filter((device) =>
@@ -95,6 +107,7 @@ export function KantechReaderGroups({ onDevToolsChange }: { onDevToolsChange: (e
       </div>
       <p className="kantech-readers__details kantech-rcp-help">Urządzenia w jednej grupie obsługują wspólną listę obecności.</p>
       {error && <p role="alert" className="kantech-monitor__error">{error}</p>}
+      {loadError && <p role="alert" className="kantech-monitor__error">{loadError}</p>}
       {draft && (
         <form className="kantech-rcp-form" onSubmit={save}>
           <h3>{draft.id ? "Edytuj grupę RCP" : "Nowa grupa RCP"}</h3>
@@ -146,9 +159,9 @@ export function KantechReaderGroups({ onDevToolsChange }: { onDevToolsChange: (e
           </div>
         </form>
       )}
-      {!snapshot && !error && <p role="status">Ładowanie grup…</p>}
-      {!snapshot && error && <button type="button" className="admin-button admin-button--secondary"
-        onClick={() => { setError(""); setReload((value) => value + 1); }}>Ponów</button>}
+      {!snapshot && !loadError && <p role="status" className="kantech-reader-list__empty">Ładowanie grup…</p>}
+      {!snapshot && loadError && <button type="button" className="admin-button admin-button--secondary"
+        onClick={() => setReload((value) => value + 1)}>Ponów</button>}
       {snapshot && !snapshot.groups.length && !draft && <p className="kantech-reader-list__empty">Brak zapisanych grup RCP.</p>}
       {!!snapshot?.groups.length && <ul className="kantech-reader-list">
         {snapshot.groups.map((group) => (
@@ -166,10 +179,22 @@ export function KantechReaderGroups({ onDevToolsChange }: { onDevToolsChange: (e
             </div>
             {group.devices.map((device) => <div className="kantech-rcp-summary" key={device.id}>
               <strong>{deviceName(device.id)}</strong>
-              {device.readers.map((reader) => <span key={reader.id}>
-                <span aria-hidden="true">{reader.role === "ENTRY" ? "→" : reader.role === "EXIT" ? "←" : "↔"} </span>
-                {roles[reader.role]} <span className="kantech-monitor__mono">{reader.id}</span>
-              </span>)}
+              <div className="kantech-rcp-summary__readers">
+                {device.readers.map((reader) => {
+                  const state = loadError ? undefined : snapshot.readerStatuses?.[reader.id];
+                  return (
+                    <div className="kantech-rcp-summary__reader" key={reader.id}>
+                      <span>
+                        <span aria-hidden="true">{reader.role === "ENTRY" ? "→" : reader.role === "EXIT" ? "←" : "↔"} </span>
+                        {roles[reader.role]} <span className="kantech-monitor__mono">{reader.id}</span>
+                      </span>
+                      <span className="kantech-rcp-summary__state" data-state={state}>
+                        {state === "connected" ? "Połączony" : state === "unavailable" ? "Niedostępny" : "Brak aktualnego statusu"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>)}
           </li>
         ))}

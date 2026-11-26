@@ -199,7 +199,18 @@ kantechReaders.get('/inventory', async (_req, res) => {
 
 kantechReaders.get('/groups', async (_req, res) => {
     try {
-        res.json({ ...await listReaderGroups(), devTools: env.KANTECH_DEV_TOOLS });
+        const [configuration, statuses] = await Promise.all([
+            listReaderGroups(),
+            attendanceDb.kantechReaderStatus.findMany({
+                where: { reader: { groupId: { not: null } } },
+                select: { readerId: true, state: true, checkedAt: true },
+            }),
+        ]);
+        const cutoff = Date.now() - 25_000;
+        const readerStatuses = Object.fromEntries(statuses
+            .filter(({ checkedAt }) => checkedAt.getTime() >= cutoff)
+            .map(({ readerId, state }) => [readerId, state]));
+        res.json({ ...configuration, readerStatuses, devTools: env.KANTECH_DEV_TOOLS });
     } catch {
         res.status(503).json({ message: 'Nie udało się pobrać grup i urządzeń RCP.' });
     }

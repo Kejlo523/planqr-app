@@ -1,6 +1,6 @@
 .attendance-page { min-height: 100dvh; }
 .attendance-page__shell {
-  width: min(100%, 48rem);
+  width: min(100%, clamp(48rem, 45vw, 64rem));
   padding: clamp(.75rem, 3vw, 1.75rem);
   margin-inline: auto;
 }

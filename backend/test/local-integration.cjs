@@ -99,7 +99,7 @@ async function browserSmoke(api, simulator, password, directory) {
         const gridBody = page.locator('.admin-devices-grid .ag-body-viewport');
         await gridBody.waitFor({ state: 'attached' });
         const tabletSelection = page.getByRole('checkbox', { name: /^Zaznacz tablet / });
-        for (const width of [1920, 1440, 1280, 1024, 390]) {
+        for (const width of [3840, 2560, 1920, 1440, 1280, 1024, 390]) {
             await page.setViewportSize({ width, height: 950 });
             assert.ok((await gridBody.boundingBox())?.height >= 64, 'Tablet grid has room for a row at ' + width + 'px');
             await tabletSelection.waitFor();
@@ -153,6 +153,15 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByRole('link', { name: 'Kantech', exact: true }).click();
         await page.getByRole('heading', { name: 'Kantech na żywo' }).waitFor();
         await page.getByRole('cell', { name: cardId, exact: true }).waitFor();
+        assert.equal(await page.getByRole('region', { name: 'Stan czytników' }).count(), 0);
+        await page.setViewportSize({ width: 390, height: 780 });
+        const extraFilters = page.getByRole('button', { name: 'Filtry', exact: true });
+        await extraFilters.waitFor();
+        assert.equal(await page.getByLabel('RCP', { exact: true }).isVisible(), false);
+        await extraFilters.click();
+        assert.equal(await page.getByLabel('RCP', { exact: true }).isVisible(), true);
+        await extraFilters.click();
+        await page.setViewportSize({ width: 1200, height: 780 });
         await page.getByRole('cell', { name: 'Zamknięto listę' }).first().waitFor();
         await page.getByLabel('Szukaj odbić').fill(cardId);
         await page.getByLabel('RCP', { exact: true }).selectOption('RCP-22@01.02');
@@ -325,12 +334,6 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.ok(simulatedContent.includes(Buffer.from('L7')));
         assert.ok(simulatedContent.includes(Buffer.from('Prowadzący Testowy')));
         await page.goto(url + '/adminpanel/kantech?view=readers');
-        const inventory = page.getByRole('complementary', { name: 'Czytniki w SmartService' });
-        const inventoryDoor = (id) => inventory.getByRole('listitem').filter({ hasText: id });
-        await inventoryDoor('49919').getByText('Online', { exact: true }).waitFor();
-        await inventoryDoor('49888').getByText('Offline', { exact: true }).waitFor();
-        await inventoryDoor('49889').getByText('Wyłączony', { exact: true }).waitFor();
-        await inventoryDoor('49890').getByText('Brak stanu', { exact: true }).waitFor();
         const rcpGroups = page.getByRole('region', { name: 'Grupy urządzeń RCP' });
         await rcpGroups.getByRole('button', { name: 'Dodaj grupę' }).click();
         await rcpGroups.getByLabel('Nazwa grupy').fill('Konfiguracja testowa');
@@ -340,16 +343,29 @@ async function browserSmoke(api, simulator, password, directory) {
         assert.equal(await rcpGroups.getByLabel('Rola czytnika 49702').inputValue(), 'EXIT');
         assert.equal(await page.getByRole('button', { name: 'Dodaj czytniki', exact: true }).count(), 0);
         assert.equal(await page.getByRole('heading', { name: 'Czytniki poza grupami' }).count(), 0);
-        await page.setViewportSize({ width: 1440, height: 900 });
-        assert.ok((await inventory.boundingBox()).x > (await rcpGroups.boundingBox()).x);
-        await page.setViewportSize({ width: 390, height: 780 });
-        assert.ok((await inventory.boundingBox()).y > (await rcpGroups.boundingBox()).y);
-        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+        assert.equal(await page.getByRole('heading', { name: 'Czytniki w SmartService' }).count(), 0);
         await rcpGroups.getByRole('button', { name: 'Zapisz grupę' }).click();
-        await rcpGroups.getByText('Konfiguracja testowa', { exact: true }).waitFor();
+        const configuredGroup = rcpGroups.getByRole('listitem').filter({ hasText: 'Konfiguracja testowa' });
+        const connected = configuredGroup.getByText('Połączony', { exact: true });
+        await connected.nth(1).waitFor();
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await configuredGroup.getByText('Wejście 49701', { exact: false }).waitFor();
+        if (screenshots) await page.screenshot({
+            path: join(screenshots, 'kantech-readers-desktop.png'), animations: 'disabled',
+        });
+        await page.setViewportSize({ width: 390, height: 780 });
+        await configuredGroup.getByText('Wyjście 49702', { exact: false }).waitFor();
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+        if (screenshots) await page.screenshot({ path: join(screenshots, 'kantech-readers-mobile.png') });
+        try {
+            assert.ok((await request(simulator + '/test/availability', { json: { reader: false } })).ok);
+            await configuredGroup.getByText('Niedostępny', { exact: true }).nth(1).waitFor();
+        } finally {
+            assert.ok((await request(simulator + '/test/availability', { json: { reader: true } })).ok);
+        }
+        await connected.nth(1).waitFor();
         page.once('dialog', (dialog) => dialog.accept());
-        await rcpGroups.getByRole('listitem').filter({ hasText: 'Konfiguracja testowa' })
-            .getByRole('button', { name: 'Usuń grupę' }).click();
+        await configuredGroup.getByRole('button', { name: 'Usuń grupę' }).click();
         await rcpGroups.getByText('Konfiguracja testowa', { exact: true }).waitFor({ state: 'hidden' });
 
         await page.setViewportSize({ width: 1366, height: 800 });
@@ -367,8 +383,15 @@ async function browserSmoke(api, simulator, password, directory) {
         await page.getByLabel('Obszar').selectOption('AUTH');
         await page.getByRole('cell', { name: 'Zalogowano się', exact: true }).first().waitFor();
         await page.setViewportSize({ width: 390, height: 720 });
+        await page.getByRole('button', { name: 'Rozwiń sekcję Przechowywanie logów' }).click();
         assert.ok(await page.getByLabel('Okres przechowywania w dniach').isVisible());
+        await page.getByRole('button', { name: 'Zwiń sekcję Przechowywanie logów' }).click();
         assert.ok(await page.getByRole('table', { name: 'Dziennik działań w PlanQR' }).isVisible());
+        const logWrapper = page.locator('.admin-audit .admin-table__wrapper');
+        for (const width of [320, 390, 2560, 3840]) {
+            await page.setViewportSize({ width, height: width > 1000 ? 1440 : 720 });
+            assert.ok(await logWrapper.evaluate((element) => element.scrollWidth <= element.clientWidth + 1));
+        }
         console.log('Browser monitor, LDAP session, XLSX download and audit filters passed.');
     } finally {
         await browser.close();

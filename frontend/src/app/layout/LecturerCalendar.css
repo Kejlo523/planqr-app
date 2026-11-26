@@ -40,7 +40,7 @@ body.lecturer-console-scroll-root {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0.75rem;
+  padding: clamp(.75rem, 1vw, 1.5rem);
   overflow: hidden;
 }
 
@@ -258,7 +258,7 @@ body.lecturer-console-scroll-root {
 }
 
 .lecturer-console__calendar-frame .fc .fc-timegrid-slot {
-  height: 1.55rem;
+  height: clamp(1.55rem, calc((100dvh - 17rem) / 29), 4.2rem);
 }
 
 .lecturer-console__calendar-frame .fc .fc-timegrid-axis {
@@ -297,7 +297,7 @@ body.lecturer-console-scroll-root {
 .lecturer-console__calendar-frame .fc .fc-timegrid-slot-label-cushion {
   padding-inline: .6rem;
   color: var(--admin-text-soft);
-  font-size: 0.76rem;
+  font-size: clamp(.76rem, .9dvh, .98rem);
   font-variant-numeric: tabular-nums;
 }
 
@@ -389,7 +389,7 @@ body.lecturer-console-scroll-root {
   white-space: normal;
   overflow: hidden;
   overflow-wrap: anywhere;
-  font-size: clamp(.64rem, 8cqi, .91rem);
+  font-size: clamp(.64rem, 8cqi, clamp(.91rem, 1.3dvh, 1.15rem));
   font-weight: 600;
   line-height: 1.16;
 }

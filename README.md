@@ -62,11 +62,13 @@ W domyślnym trybie `KANTECH_TRANSPORT=http` proces czytnika wysyła ten sam for
 
 Administrator LDAP w zakładce **Czytniki** pod `/adminpanel/kantech?view=readers` tworzy grupę i wybiera urządzenia ze spisu SmartService. PlanQR pobiera identyfikatory czytników według oznaczenia RCP i adresu urządzenia w etykietach `Doors`. Każdy czytnik w grupie ma rolę wejścia, wyjścia albo obu kierunków. Tylko czytniki przypisane przez urządzenie do grupy mogą otwierać nowe listy obecności. Listy otwarte w dawnej konfiguracji można dokończyć w dotychczasowy sposób.
 
-`GET /api/kantech/readers/groups` zwraca zapisane grupy i urządzenia wykryte w SmartService. `POST /api/kantech/readers/groups` zapisuje `name`, listę `devices` z ich `id` oraz `readers: [{ id, role }]`. Role to `ENTRY`, `EXIT` i `BOTH`. Opcjonalne `id` wskazuje edytowaną grupę. `DELETE /api/kantech/readers/groups/:id` usuwa grupę.
+`GET /api/kantech/readers/groups` zwraca zapisane grupy, urządzenia wykryte w SmartService oraz `readerStatuses`. Jest to mapa ID czytnika na stan `connected` lub `unavailable` z ostatnich 25 sekund. Zakładka **Czytniki** odświeża dane co pięć sekund i pokazuje stan obok roli i ID w grupie RCP.
+
+`POST /api/kantech/readers/groups` zapisuje `name`, listę `devices` z ich `id` oraz `readers: [{ id, role }]`. Role to `ENTRY`, `EXIT` i `BOTH`. Opcjonalne `id` wskazuje edytowaną grupę. `DELETE /api/kantech/readers/groups/:id` usuwa grupę.
 
 `GET /api/kantech/readers` zwraca czytniki z rejestru odczytu. Konfigurację zapisu obecności obsługuje API grup RCP.
 
-W bocznym panelu **Czytniki w SmartService** widać wszystkie urządzenia zwrócone przez `Doors`, także bez przypisania w PlanQR. Worker odświeża listę co minutę, a stan odczytuje z `ComponentFullStatus`. `GET /api/kantech/readers/inventory` zwraca ostatnią listę z czasem odczytu administratorowi LDAP. Jeżeli odczyt się nie powiedzie, panel po dwóch minutach oznacza dane jako nieaktualne.
+Urządzenia wykryte przez SmartService są dostępne przy dodawaniu i edycji grupy. Worker odświeża listę `Doors` co minutę, a stan w spisie odczytuje z `ComponentFullStatus`. Administrator LDAP ma dostęp do ostatniego spisu i czasu odczytu przez `GET /api/kantech/readers/inventory`.
 
 Jawne przypisania aliasów, np. `WISYNC_5`, mają pierwszeństwo przed automatycznym rozpoznaniem. Karta studenta w formacie `s<numer albumu>` jest rozpoznawana bez przypisania, a cyfry po `s` trafiają na listę jako numer albumu. Dla prowadzącego aplikacja korzysta z imienia i nazwiska z pamięci LDAP. Przy braku profilu szuka w Planie ZUT jednoznacznego dopasowania inicjału i nazwiska z loginu. Zajęcia wybiera z planu prowadzącego według godziny odbicia karty.
 

@@ -111,7 +111,7 @@ const PendingTabletsView = ({
         ) : (
           <AdminPanelTable
             caption="Lista tabletów oczekujących na sparowanie"
-            className="admin-table--pending admin-table--pending-tablets"
+            className="admin-table--pending admin-table--pending-tablets admin-table--compact"
             wrapperClassName="admin-table__wrapper--pending"
             columns={[
               { content: "Kod parowania", className: "admin-table__col--device-id" },

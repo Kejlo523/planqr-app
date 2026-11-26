@@ -1,13 +1,21 @@
 .kantech-monitor { padding: clamp(1rem, 3vw, 2.25rem); }
-.kantech-monitor__body { width: min(100%, 1160px); margin: 0 auto; min-width: 0; }
+.kantech-monitor__body {
+  width: min(100%, var(--workspace-page-width));
+  margin: 0 auto;
+  min-width: 0;
+  container: kantech / inline-size;
+}
 .kantech-monitor__nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: .1rem clamp(.7rem, 2cqi, 1.25rem);
   border-bottom: 1px solid var(--pq-line);
 }
 .kantech-monitor__nav a {
-  padding: .5rem 0;
+  display: flex;
+  align-items: center;
+  min-height: 2.65rem;
+  padding: .4rem 0;
   border-bottom: 2px solid transparent;
   color: var(--pq-muted);
   font-size: .88rem;
@@ -23,9 +31,6 @@
 .kantech-monitor__mode-control .admin-switch input { flex-shrink: 0; }
 .kantech-monitor__mode-control .admin-switch input:disabled { opacity: .6; cursor: wait; }
 .kantech-monitor__mode { padding: .45rem .75rem; background: var(--admin-accent-soft); color: var(--admin-accent-text); border-radius: var(--admin-radius); font-weight: 600; }
-.kantech-monitor__readers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
-.kantech-monitor__reader { background: var(--admin-surface); border: 1px solid var(--admin-border); border-radius: var(--admin-radius); border-left: .25rem solid var(--admin-warning); padding: .75rem 1rem; display: grid; gap: .25rem; }
-.kantech-monitor__reader[data-online="true"] { border-left-color: var(--admin-success); }
 .kantech-monitor__mono, .kantech-monitor td:nth-child(-n + 4) { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
 .kantech-monitor__feed { border: 1px solid var(--admin-border); border-radius: var(--admin-radius); background: var(--admin-surface); }
 .kantech-monitor__feed-header { padding: .9rem 1rem; background: var(--admin-surface-muted); }
@@ -39,6 +44,8 @@
   padding: .85rem 1rem;
 }
 .kantech-monitor__filters label { display: grid; gap: .3rem; min-width: 0; font-size: .875rem; }
+.kantech-monitor__filter-quick, .kantech-monitor__filter-options { display: contents; }
+.kantech-monitor__filters .kantech-monitor__filter-toggle { display: none; }
 .kantech-monitor__filters input, .kantech-monitor__filters select {
   min-width: 0;
   width: 100%;
@@ -51,17 +58,40 @@
   font: inherit;
 }
 .kantech-monitor__filters button { justify-self: start; }
-.kantech-monitor__scroll { overflow-x: auto; }
+.kantech-monitor__scroll { max-height: clamp(19rem, 67dvh, 82rem); overflow: auto; }
 .kantech-monitor table { width: 100%; border-collapse: collapse; text-align: left; }
-.kantech-monitor th, .kantech-monitor td { padding: .7rem 1rem; border-top: 1px solid var(--admin-accent-border); white-space: nowrap; }
+.kantech-monitor th, .kantech-monitor td { padding: .7rem 1rem; border-top: 1px solid var(--admin-border); }
+.kantech-monitor th { position: sticky; top: 0; z-index: 1; background: var(--admin-surface-muted); }
+.kantech-monitor td:not([data-label="Wynik"]) { overflow-wrap: anywhere; }
+.kantech-monitor td[data-label="Odbicie"], .kantech-monitor td[data-label="Odebrano"] { white-space: nowrap; }
+.kantech-monitor td[data-outcome="recorded"], .kantech-monitor td[data-outcome="opened"] { color: var(--admin-success); }
+.kantech-monitor td[data-outcome="access_denied"] { color: var(--admin-danger); }
 .kantech-monitor td:first-child { color: var(--admin-accent-text); }
-.kantech-monitor td[data-label="Karta"] { max-width: 18rem; white-space: normal; overflow-wrap: anywhere; }
+.kantech-monitor td[data-label="Karta"] { max-width: 18rem; }
 .kantech-monitor td small { display: block; font: .8rem/1.4 system-ui, sans-serif; color: var(--admin-text-muted); }
 .kantech-monitor__empty { padding: 1rem; margin: 0; }
 .kantech-monitor__error { padding: .75rem 1rem; background: var(--admin-danger-soft); }
 .kantech-monitor :focus-visible { outline: 2px solid var(--pq-focus); outline-offset: 2px; }
 
-@media (max-width: 630px) {
+@container kantech (max-width: 48rem) {
+  .kantech-monitor__filters { display: block; }
+  .kantech-monitor__filter-quick {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: .55rem;
+  }
+  .kantech-monitor__filters .kantech-monitor__filter-toggle { display: inline-flex; min-height: 2.75rem; }
+  .kantech-monitor__filter-options {
+    display: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .55rem;
+    margin-top: .65rem;
+  }
+  .kantech-monitor__filters[data-mobile-open="true"] .kantech-monitor__filter-options { display: grid; }
+  .kantech-monitor__filters input, .kantech-monitor__filters select { min-height: 2.75rem; font-size: 1rem; }
+  .kantech-monitor__filter-options button { align-self: end; min-height: 2.75rem; }
+  .kantech-monitor__scroll { max-height: none; overflow: visible; }
   .kantech-monitor thead { position: absolute; clip-path: inset(50%); width: 1px; height: 1px; overflow: hidden; }
   .kantech-monitor tbody, .kantech-monitor table { display: block; }
   .kantech-monitor tbody tr {
@@ -71,7 +101,9 @@
     padding: .6rem .9rem;
     gap: .5rem .75rem;
   }
-  .kantech-monitor td { white-space: normal; border: 0; padding: 0; }
+  .kantech-monitor td,
+  .kantech-monitor td[data-label="Odbicie"],
+  .kantech-monitor td[data-label="Odebrano"] { white-space: normal; border: 0; padding: 0; }
   .kantech-monitor td::before {
     content: attr(data-label);
     display: block;
@@ -81,4 +113,9 @@
     font-weight: 600;
     line-height: 1.45;
   }
+}
+
+@container kantech (max-width: 23rem) {
+  .kantech-monitor__nav a { font-size: .82rem; }
+  .kantech-monitor__mode-control { gap: .4rem; }
 }
